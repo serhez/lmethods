@@ -3,7 +3,7 @@ from dataclasses import dataclass
 from lmodels import Model
 from mloggers import Logger
 
-from lmethods import Method
+from lmethods.method import Method
 
 
 class MetaPrompting(Method):
