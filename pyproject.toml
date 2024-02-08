@@ -18,8 +18,8 @@ classifiers = [
 ]
 dependencies = [
     "mloggers",
-    "git+https://github.com/serhez/ldata.git",
-    "git+https://github.com/serhez/lmodels.git",
+    "ldata@git+https://github.com/serhez/ldata.git",
+    "lmodels@git+https://github.com/serhez/lmodels.git",
 ]
 
 [project.urls]
