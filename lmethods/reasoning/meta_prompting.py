@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+from typing import Optional
 
 from lmodels import Model
 from mloggers import Logger
@@ -33,13 +34,13 @@ class MetaPrompting(Method):
         with open(config.split_metaprompt_path, "r") as file:
             self._meta_prompt = file.read()
 
-    def generate(self, input) -> str:
-        input = self._meta_prompt.format(problem=input)
+    def _generate_impl(self, context: str, max_tokens: Optional[int] = None) -> str:
+        input = self._meta_prompt.format(problem=context)
 
         if self._config.debug:
             self._logger.debug(f"Input (including meta-prompt):\n\n{input}")
 
-        return self._model.generate(input)
+        return self._model.generate(input, max_tokens)
 
     def fine_tune(self, dataset):
         self._model.fine_tune(dataset)
