@@ -1,0 +1,27 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "lmethods"
+version = "0.0.1"
+authors = [
+    { name = "Sergio Hernandez Gutierrez", email = "contact.sergiohernandez@gmail.com" },
+]
+description = "A collection of both novel and baseline methods to enhance the capabilities of language models."
+readme = "README.md"
+requires-python = ">=3.10, <3.12"
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+]
+dependencies = [
+    "mloggers",
+    "git+https://github.com/serhez/ldata.git",
+    "git+https://github.com/serhez/lmodels.git",
+]
+
+[project.urls]
+Homepage = "https://github.com/serhez/lmethods"
+Issues = "https://github.com/serhez/lmethods/issues"
