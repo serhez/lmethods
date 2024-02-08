@@ -31,7 +31,7 @@ class MetaPrompting(Method):
 
         super().__init__(model, config, logger)
 
-        with open(config.split_metaprompt_path, "r") as file:
+        with open(config.meta_prompt_path, "r") as file:
             self._meta_prompt = file.read()
 
     def _generate_impl(self, context: str, max_tokens: Optional[int] = None) -> str:
