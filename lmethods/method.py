@@ -50,6 +50,7 @@ class Method(ABC):
         ### Parameters
         ----------
         `context`: the context/s to generate from.
+        - If `context` is a dataset, the method will generate tokens for each context string in the test set.
         `max_tokens`: the maximum number of tokens to generate per context string.
         - If None, the method will generate tokens until the EOS token is produced.
 
@@ -69,11 +70,8 @@ class Method(ABC):
         if isinstance(context, Iterator):
             return [self._generate_impl(c, max_tokens) for c in context]
 
-        # TODO: implement this once the Dataset class is implemented
         if isinstance(context, Dataset):
-            raise NotImplementedError(
-                "The `Dataset` class is not yet implemented. Please use a list of strings instead."
-            )
+            return [self._generate_impl(c, max_tokens) for c in context.test_set.input]
 
         raise ValueError(
             f"Invalid type for `context`: {type(context)}. Must be a string, list of strings, iterator returning strings or `Dataset`."
