@@ -12,5 +12,5 @@ This package depends on external representations of data sources and language mo
 - [`ldata`](https://github.com/serhez/ldata): this library provides dataset and benchmark abstractions that make training, fine-tuning and evaluation of language-models easier.
 - [`lmodels`](https://github.com/serhez/lmodels): this package offers access to different LLMs under a common API; you can load existing weights, train, fine-tune or even create your own models within a private fork of this repository.
 
-> [INFO!]
-> While you do not have to use `ldata` objects to use any of our library, it currently is listed as a dependency of this package because we use their types. In the future, we plan on dropping this dependency.
+> [!NOTE]
+> While you do not have to use `ldata` objects to use any part of our library, it currently is listed as a dependency of this package because we use their types. In the future, we plan on dropping this dependency to make this package more self-contained and light-weight.
