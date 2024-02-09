@@ -22,7 +22,6 @@ classifiers = [
 dependencies = [
     "mloggers",
     "ldata@git+https://github.com/serhez/ldata.git",
-    "lmodels@git+https://github.com/serhez/lmodels.git",
 ]
 
 [project.urls]

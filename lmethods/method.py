@@ -1,9 +1,10 @@
+from __future__ import annotations
+
 from abc import ABC, abstractmethod
-from dataclasses import dataclass
-from typing import Any, Callable, Iterator, List, Optional, Union
+from dataclasses import MISSING, dataclass
+from typing import Any, Callable, Iterator, List, Optional, Tuple, Union
 
 from ldata import Dataset
-from lmodels import Model
 from mloggers import Logger
 
 
@@ -15,10 +16,45 @@ class Method(ABC):
 
     @dataclass(kw_only=True)
     class Config:
+        name: str = MISSING
+        """The name of the method."""
+
         debug: bool = False
         """Whether to enable debug mode with extended logging."""
 
-    def __init__(self, model: Model, config: Config, logger: Logger):
+    class _Model(ABC):
+        """An interface for a model object used within a method."""
+
+        @classmethod
+        def __subclasshook__(cls, subclass):
+            return (
+                hasattr(subclass, "generate")
+                and callable(subclass.generate)
+                and hasattr(subclass, "fine_tune")
+                and callable(subclass.fine_tune)
+            )
+
+        @property
+        @abstractmethod
+        def generate(
+            self,
+            context: Union[
+                str,
+                List[str],
+                Iterator[str],
+                Dataset[str, str],
+            ],
+            max_tokens: Optional[int],
+        ) -> Union[str, List[str]]:
+            """Generates the next tokens given some language context sequence."""
+            raise NotImplementedError
+
+        @abstractmethod
+        def fine_tune(self, dataset: Union[Dataset, List[Tuple[str, str]]]):
+            """Fine-tunes the model given some dataset."""
+            raise NotImplementedError
+
+    def __init__(self, model: _Model, config: Config, logger: Logger):
         """
         Initialize the method.
 
@@ -32,6 +68,14 @@ class Method(ABC):
         self._model = model
         self._config = config
         self._logger = logger
+
+    def __repr__(self):
+        return f"{self.__class__.__name__}(name={self._config.name})"
+
+    @property
+    def name(self) -> str:
+        """The name of the method."""
+        return self._config.name
 
     def generate(
         self,
@@ -71,7 +115,7 @@ class Method(ABC):
             return [self._generate_impl(c, max_tokens) for c in context]
 
         if isinstance(context, Dataset):
-            return [self._generate_impl(c, max_tokens) for c in context.test_set.input]
+            return [self._generate_impl(c, max_tokens) for c in context.test_set.inputs]
 
         raise ValueError(
             f"Invalid type for `context`: {type(context)}. Must be a string, list of strings, iterator returning strings or `Dataset`."
@@ -101,9 +145,9 @@ class Method(ABC):
         pass
 
     @abstractmethod
-    def fine_tune(self, dataset: Dataset):
+    def train(self, dataset: Union[Dataset, List[Tuple[str, str]]]):
         """
-        Fine-tunes the method.
+        Trains the method (if needed).
 
         ### Parameters
         ----------
