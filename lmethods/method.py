@@ -4,7 +4,7 @@ from abc import ABC, abstractmethod
 from dataclasses import MISSING, dataclass
 from typing import Any, Callable, Iterator, List, Optional, Tuple, Union
 
-from ldata import Dataset
+from ldata import Dataset  # TODO: Drop this dependency with own Dataset interface
 from mloggers import Logger
 
 
