@@ -1,7 +1,7 @@
 from dataclasses import dataclass
-from typing import Optional
+from typing import List, Optional, Tuple, Union
 
-from lmodels import Model
+from ldata import Dataset
 from mloggers import Logger
 
 from lmethods.method import Method
@@ -18,7 +18,7 @@ class MetaPrompting(Method):
         meta_prompt_path: str
         """The path to the meta-prompt used to solve multi-step reasoning problems."""
 
-    def __init__(self, model: Model, config: Config, logger: Logger):
+    def __init__(self, model: Method._Model, config: Config, logger: Logger):
         """
         Initialize the recursive prompting method.
 
@@ -42,5 +42,5 @@ class MetaPrompting(Method):
 
         return self._model.generate(input, max_tokens)
 
-    def fine_tune(self, dataset):
+    def train(self, dataset: Union[Dataset, List[Tuple[str, str]]]):
         self._model.fine_tune(dataset)
