@@ -49,3 +49,12 @@ class MetaPrompting(Method):
 
     def train(self, dataset: Union[Dataset, List[Tuple[str, str]]]):
         self._model.fine_tune(dataset)
+
+
+try:
+    from hydra.core.config_store import ConfigStore
+
+    cs = ConfigStore.instance()
+    cs.store(name="base_meta_prompting", node=MetaPrompting.Config)
+except ModuleNotFoundError:
+    pass
