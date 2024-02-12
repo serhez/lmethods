@@ -1,7 +1,5 @@
 from . import reasoning
 from .method import Method
+from .reasoning import MetaPrompting
 
-__all__ = [
-    "Method",
-    "reasoning",
-]
+__all__ = ["reasoning", "Method", "MetaPrompting"]

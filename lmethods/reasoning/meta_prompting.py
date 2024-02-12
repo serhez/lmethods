@@ -15,6 +15,11 @@ class MetaPrompting(Method):
 
     @dataclass(kw_only=True)
     class Config(Method.Config):
+        """The configuration of the recursive prompting method."""
+
+        name: str = "MetaPrompting"
+        """The name of the method."""
+
         meta_prompt_path: str
         """The path to the meta-prompt used to solve multi-step reasoning problems."""
 

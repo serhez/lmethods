@@ -16,6 +16,8 @@ class Method(ABC):
 
     @dataclass(kw_only=True)
     class Config:
+        """The configuration of a method."""
+
         name: str = MISSING
         """The name of the method."""
 
