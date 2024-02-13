@@ -1,5 +1,5 @@
 # LMethods
-A collection of both novel and baseline methods to enhance the capabilities of language models, by Aalto LaReL research group.
+A collection of both novel and baseline methods to enhance the capabilities of language models.
 
 ## Developing new methods
 If you are developing an existing baseline method, feel free to contribute directly to this repo by creating a new branch with the name of the new method. If you are developing a novel method you would like to keep private for a while, you can fork this repo and make it private; when the new method is ready for publication, you can make a pull request in this repo to merge your method here. You can always `sync` the fork with the upstream (i.e., this repo) in order to get the latest updates either in the GitHub website or via the GitHub CLI as `gh repo sync owner/cli-fork -b BRANCH_NAME`.
@@ -14,3 +14,6 @@ This package depends on external representations of data sources and language mo
 
 > [!NOTE]
 > While you do not have to use `ldata` objects to use any part of our library, it currently is listed as a dependency of this package because we use their types. In the future, we plan on dropping this dependency to make this package more self-contained and light-weight.
+
+## Todo's
+- [ ] Composition of methods (e.g., adding Self-Consistency to any other existing method).
