@@ -1,4 +1,4 @@
-from dataclasses import dataclass
+from dataclasses import MISSING, dataclass
 from typing import List, Optional, Tuple, Union
 
 from ldata import Dataset
@@ -20,7 +20,7 @@ class MetaPrompting(Method):
         name: str = "MetaPrompting"
         """The name of the method."""
 
-        meta_prompt_path: str
+        meta_prompt_path: str = MISSING
         """The path to the meta-prompt used to solve multi-step reasoning problems."""
 
     def __init__(self, model: Method._Model, config: Config, logger: Logger):
