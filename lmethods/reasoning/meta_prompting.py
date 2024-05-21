@@ -1,9 +1,4 @@
-<<<<<<< HEAD
-from dataclasses import MISSING, dataclass
-from typing import List, Optional, Tuple, Union
-=======
 from __future__ import annotations
->>>>>>> recursive-prompting
 
 from dataclasses import dataclass, field
 from typing import Any
