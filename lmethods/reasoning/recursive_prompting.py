@@ -589,7 +589,7 @@ class RecursivePrompting(Method):
             output, info = self._model.generate(
                 split_prompt, max_tokens=self._config.max_internal_tokens
             )
-            split = output[0][0]
+            split = self._extract_answer(output[0][0])
             self._local_usage += info.usage
             self.usage += info.usage
         except Exception as e:
@@ -653,7 +653,7 @@ class RecursivePrompting(Method):
             output, info = self._model.generate(
                 instructions_prompt, max_tokens=self._config.max_internal_tokens
             )
-            instructions = output[0][0]
+            instructions = self._extract_answer(output[0][0])
             self._local_usage += info.usage
             self.usage += info.usage
         except Exception as e:
@@ -706,7 +706,7 @@ class RecursivePrompting(Method):
             output, info = self._model.generate(
                 merge_prompt, max_tokens=self._config.max_internal_tokens
             )
-            merge = output[0][0]
+            merge = self._extract_answer(output[0][0])
             self._local_usage += info.usage
             self.usage += info.usage
         except Exception as e:
