@@ -16,7 +16,7 @@ from .self_consistency import (
     parse_self_consistency_output,
 )
 from .threading import GuardedValue
-from .usage import Usage, UsageInterface
+from .usage import Usage
 
 __all__ = [
     "Edge",
@@ -28,7 +28,6 @@ __all__ = [
     "GuardedValue",
     "BaseShotsCollection",
     "Usage",
-    "UsageInterface",
     "read_prompt",
     "construct_shots_str",
     "choose_response_via_sc",
