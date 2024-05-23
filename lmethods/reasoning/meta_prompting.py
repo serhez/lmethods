@@ -188,10 +188,23 @@ class MetaPrompting(Method):
         shots_str = construct_shots_str(shots.solve)
 
         inputs = [[self._prompt.format(problem=c, shots=shots_str)] for c in context]
+
         try:
+            # One sample is chosen with a low temperature (0.0)
             outputs, info = self._model.generate(
-                inputs, n_samples=self._config.self_consistency_n, max_tokens=max_tokens
+                inputs, max_tokens=max_tokens, temperature=0.0
             )
+
+            # All other samples are chosen with a high temperature (the model's default temp.)
+            if self._config.self_consistency_n > 1:
+                extra_outputs, extra_info = self._model.generate(
+                    inputs,
+                    n_samples=self._config.self_consistency_n - 1,
+                    max_tokens=max_tokens,
+                )
+                outputs = np.concatenate((outputs, extra_outputs), axis=1)
+                info += extra_info
+
             outputs = [[s for s in o] for o in outputs]
             responses = [[self._extract_answer(s) for s in o] for o in outputs]
             local_usage += info.usage
@@ -235,7 +248,8 @@ class MetaPrompting(Method):
         )
 
         return chosen_responses, MetaPrompting.GenerationInfo(
-            usage=local_usage, all_responses=responses
+            usage=local_usage,
+            all_responses=responses,  # type: ignore[reportArgumentType]
         )
 
     def _generate_impl(
@@ -290,7 +304,8 @@ class MetaPrompting(Method):
         )
 
         return responses[chosen_idx], MetaPrompting.GenerationInfo(
-            usage=local_usage, all_responses=[responses]
+            usage=local_usage,
+            all_responses=[responses],  # type: ignore[reportArgumentType]
         )
 
     def train(self, dataset: Dataset | list[tuple[str, str]]):
