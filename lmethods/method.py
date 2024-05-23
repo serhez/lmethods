@@ -152,7 +152,9 @@ class Method(ABC):
 
         self._answer_regex = None
         if self._config.answer_regex is not None:
-            self._answer_regex = re.compile(self._config.answer_regex)
+            self._answer_regex = re.compile(
+                self._config.answer_regex, flags=re.MULTILINE | re.DOTALL
+            )
 
         self._logger.debug({"[Method.config]": asdict(self._config)})
 
@@ -206,7 +208,7 @@ class Method(ABC):
 
         # Use try-except to not break the `generate` pipeline for any reason
         try:
-            match = re.findall(self._answer_regex, output, re.MULTILINE | re.DOTALL)
+            match = self._answer_regex.findall(output)
             if len(match) > 1:
                 self._logger.warn(
                     {
