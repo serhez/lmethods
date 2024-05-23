@@ -150,6 +150,10 @@ class Method(ABC):
             self._logger = logger
         self._usage = Usage()
 
+        self._answer_regex = None
+        if self._config.answer_regex is not None:
+            self._answer_regex = re.compile(self._config.answer_regex)
+
         self._logger.debug({"[Method.config]": asdict(self._config)})
 
     def __repr__(self):
@@ -197,13 +201,21 @@ class Method(ABC):
         - If the regular expression does not match the output, a warning will be issued and the whole output will be considered as the answer.
         """
 
-        if self._config.answer_regex is None:
+        if self._answer_regex is None:
             return output
 
         # Use try-except to not break the `generate` pipeline for any reason
         try:
-            match = re.search(self._config.answer_regex, output)
-            answer = match.group(1)  # type: ignore[reportOptionalMemberAccess]
+            match = re.findall(self._answer_regex, output, re.MULTILINE | re.DOTALL)
+            if len(match) > 1:
+                self._logger.warn(
+                    {
+                        f"Multiple matches found for the regex '{self._config.answer_regex}'.": None,
+                        "Output": output,
+                        "Corrective action": "The first match will be considered as the answer.",
+                    }
+                )
+            answer = match[0]
         except Exception:
             self._logger.warn(
                 {
