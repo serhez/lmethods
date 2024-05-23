@@ -104,7 +104,9 @@ def choose_response_via_sc(
 
     input = construct_self_consistency_context(context, choices)
     try:
-        output, info = model.generate(input, max_tokens=len(str(len(responses))))
+        output, info = model.generate(
+            input, max_tokens=len(str(len(responses))), temperature=0.0
+        )
         usage += info.usage
         chosen_idx = parse_self_consistency_output(output[0][0])
         if chosen_idx < 0 or chosen_idx >= len(choices):
