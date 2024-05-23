@@ -6,8 +6,8 @@ from typing import Any, Protocol
 import numpy as np
 import numpy.typing as npt
 
-from lmethods.protocols.dataset import Dataset
-from lmethods.utils import UsageInterface
+from .dataset import Dataset
+from .usage import UsageInterface
 
 
 @dataclass
