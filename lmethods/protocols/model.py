@@ -68,6 +68,7 @@ class Model(Protocol):
         | Dataset,
         n_samples: int = 1,
         max_tokens: int | None = None,
+        **kwargs: Any,
     ) -> tuple[npt.NDArray[np.str_], Model.GenerationInfo]:
         """
         Generate text from a given set of contexts.
@@ -89,6 +90,7 @@ class Model(Protocol):
         `n_samples`: the number of samples to generate.
         `max_tokens`: the maximum number of tokens to generate.
         `unsafe`: whether to use the unsafe generation method.
+        Other keyword arguments may be used by each specific model; refer to the model's documentation for more information.
 
         ### Returns
         ----------
