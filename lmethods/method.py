@@ -29,7 +29,6 @@ class Method(ABC):
         max_threads: int = 4
         """The maximum number of threads to use for parallel processing."""
 
-        # TODO: Compile it in `__init__`; it does not work well with `findall` however
         answer_regex: str | None = None
         """
         The regular expression used to extract the answer from the output.
@@ -151,6 +150,12 @@ class Method(ABC):
             self._logger = logger
         self._usage = Usage()
 
+        self._answer_regex = None
+        if self._config.answer_regex is not None:
+            self._answer_regex = re.compile(
+                self._config.answer_regex, flags=re.MULTILINE | re.DOTALL
+            )
+
         self._logger.debug({"[Method.config]": asdict(self._config)})
 
     def __repr__(self):
@@ -198,14 +203,12 @@ class Method(ABC):
         - If the regular expression does not match the output, a warning will be issued and the whole output will be considered as the answer.
         """
 
-        if self._config.answer_regex is None:
+        if self._answer_regex is None:
             return output
 
         # Use try-except to not break the `generate` pipeline for any reason
         try:
-            match = re.findall(
-                self._config.answer_regex, output, re.MULTILINE | re.DOTALL
-            )
+            match = self._answer_regex.findall(output)
             if len(match) > 1:
                 self._logger.warn(
                     {
