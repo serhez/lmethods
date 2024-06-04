@@ -68,6 +68,12 @@ class MetaPrompting(Method):
         - In such case, only a single `None` is appended to the inner list, hence the length of the inner list will not be equal to `Config.self_consistency_n`.
         """
 
+        sampling_usage: Usage = field(default_factory=Usage)
+        """The usage of the model when generating responses for sampling."""
+
+        self_consistency_usage: Usage = field(default_factory=Usage)
+        """The usage of the model when generating responses for Self-Consistency."""
+
         def __add__(
             self, other: MetaPrompting.GenerationInfo | None
         ) -> MetaPrompting.GenerationInfo:
@@ -76,6 +82,13 @@ class MetaPrompting(Method):
                 all_responses=self.all_responses + other.all_responses
                 if other is not None
                 else self.all_responses + [[None]],
+                sampling_usage=self.sampling_usage + other.sampling_usage
+                if other is not None
+                else self.sampling_usage,
+                self_consistency_usage=self.self_consistency_usage
+                + other.self_consistency_usage
+                if other is not None
+                else self.self_consistency_usage,
             )
 
         def __radd__(
@@ -89,6 +102,8 @@ class MetaPrompting(Method):
             if other is not None:
                 self.usage += other.usage
                 self.all_responses += other.all_responses
+                self.sampling_usage += other.sampling_usage
+                self.self_consistency_usage += other.self_consistency_usage
             else:
                 self.all_responses += [[None]]  # type: ignore[reportAttributeAccessIssue]
             return self
@@ -105,6 +120,8 @@ class MetaPrompting(Method):
             return {
                 "usage": self.usage.to_json(),
                 "all_responses": self.all_responses,
+                "sampling_usage": self.sampling_usage.to_json(),
+                "self_consistency_usage": self.self_consistency_usage.to_json(),
             }
 
     class ShotsCollection(BaseShotsCollection):
@@ -184,7 +201,8 @@ class MetaPrompting(Method):
                 f"Invalid type for `context`: {type(context)}. Must be a string, list of strings, numpy array of strings or `Dataset`."
             )
 
-        local_usage = Usage()
+        sampling_usage = Usage()
+        sc_usage = Usage()
         shots_str = construct_shots_str(shots.solve)
 
         inputs = [[self._prompt.format(problem=c, shots=shots_str)] for c in context]
@@ -207,7 +225,7 @@ class MetaPrompting(Method):
 
             outputs = [[s for s in o] for o in outputs]
             answers = [[self._extract_answer(s) for s in o] for o in outputs]
-            local_usage += info.usage
+            sampling_usage += info.usage
             self.usage += info.usage
         except Exception as e:
             self._logger.error(
@@ -222,7 +240,7 @@ class MetaPrompting(Method):
         # Self-Consistency
         chosen_idxs = []
         for i in range(len(outputs)):
-            chosen_idx, sc_usage = choose_response_via_sc(
+            chosen_idx, usage = choose_response_via_sc(
                 self._model,
                 context[i],
                 outputs[i],
@@ -230,8 +248,8 @@ class MetaPrompting(Method):
                 self._logger,
             )
             chosen_idxs.append(chosen_idx)
-            local_usage += sc_usage
-            self.usage += sc_usage
+            sc_usage += usage
+            self.usage += usage
         chosen_answers = [answers[i][chosen_idxs[i]] for i in range(len(context))]
 
         self._logger.debug(
@@ -243,13 +261,16 @@ class MetaPrompting(Method):
                 "Batch all answers": answers,
                 "Batch chosen indices": chosen_idxs,
                 "Batch chosen answers": chosen_answers,
-                "Usage": local_usage,
+                "Sampling usage": sampling_usage,
+                "Self-Consistency usage": sc_usage,
             }
         )
 
         return chosen_answers, MetaPrompting.GenerationInfo(
-            usage=local_usage,
+            usage=sampling_usage + sc_usage,
             all_responses=outputs,  # type: ignore[reportArgumentType]
+            sampling_usage=sampling_usage,
+            self_consistency_usage=sc_usage,
         )
 
     def _generate_impl(
@@ -258,7 +279,8 @@ class MetaPrompting(Method):
         shots: ShotsCollection = ShotsCollection(),
         max_tokens: int = 500,
     ) -> tuple[str, GenerationInfo]:
-        local_usage = Usage()
+        sampling_usage = Usage()
+        sc_usage = Usage()
         shots_str = construct_shots_str(shots.solve)
 
         input = self._prompt.format(problem=context, shots=shots_str)
@@ -267,7 +289,7 @@ class MetaPrompting(Method):
             output, info = self._model.generate(
                 input, n_samples=self._config.self_consistency_n, max_tokens=max_tokens
             )
-            local_usage += info.usage
+            sampling_usage += info.usage
             self.usage += info.usage
         except Exception as e:
             self._logger.error(
@@ -280,15 +302,15 @@ class MetaPrompting(Method):
 
         # Self-Consistency
         responses = [self._extract_answer(s) for s in output[0]]
-        chosen_idx, sc_usage = choose_response_via_sc(
+        chosen_idx, usage = choose_response_via_sc(
             self._model,
             context,
             responses,
             self._config.self_consistency_max_n_per_call,
             self._logger,
         )
-        local_usage += sc_usage
-        self.usage += sc_usage
+        sc_usage += usage
+        self.usage += usage
 
         self._logger.debug(
             {
@@ -299,13 +321,16 @@ class MetaPrompting(Method):
                 "All parsed answers": responses,
                 "Chosen index": chosen_idx,
                 "Chosen answer": responses[chosen_idx],
-                "Usage": local_usage,
+                "Sampling usage": sampling_usage,
+                "Self-Consistency usage": sc_usage,
             }
         )
 
         return responses[chosen_idx], MetaPrompting.GenerationInfo(
-            usage=local_usage,
+            usage=sampling_usage + sc_usage,
             all_responses=[responses],  # type: ignore[reportArgumentType]
+            sampling_usage=sampling_usage,
+            self_consistency_usage=sc_usage,
         )
 
     def train(self, dataset: Dataset | list[tuple[str, str]]):
