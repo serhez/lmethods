@@ -206,7 +206,7 @@ class MetaPrompting(Method):
                 info += extra_info
 
             outputs = [[s for s in o] for o in outputs]
-            responses = [[self._extract_answer(s) for s in o] for o in outputs]
+            answers = [[self._extract_answer(s) for s in o] for o in outputs]
             local_usage += info.usage
             self.usage += info.usage
         except Exception as e:
@@ -217,11 +217,11 @@ class MetaPrompting(Method):
                 }
             )
             outputs = [[""] * self._config.self_consistency_n] * len(context)
-            responses = outputs
+            answers = outputs
 
         # Self-Consistency
         chosen_idxs = []
-        for i in range(len(responses)):
+        for i in range(len(outputs)):
             chosen_idx, sc_usage = choose_response_via_sc(
                 self._model,
                 context[i],
@@ -232,7 +232,7 @@ class MetaPrompting(Method):
             chosen_idxs.append(chosen_idx)
             local_usage += sc_usage
             self.usage += sc_usage
-        chosen_responses = [responses[i][chosen_idxs[i]] for i in range(len(context))]
+        chosen_answers = [answers[i][chosen_idxs[i]] for i in range(len(context))]
 
         self._logger.debug(
             {
@@ -240,16 +240,16 @@ class MetaPrompting(Method):
                 "Batch context": context,
                 "Batch input": inputs,
                 "Batch output": outputs,
-                "Batch all answers": responses,
+                "Batch all answers": answers,
                 "Batch chosen indices": chosen_idxs,
-                "Batch chosen answers": chosen_responses,
+                "Batch chosen answers": chosen_answers,
                 "Usage": local_usage,
             }
         )
 
-        return chosen_responses, MetaPrompting.GenerationInfo(
+        return chosen_answers, MetaPrompting.GenerationInfo(
             usage=local_usage,
-            all_responses=responses,  # type: ignore[reportArgumentType]
+            all_responses=outputs,  # type: ignore[reportArgumentType]
         )
 
     def _generate_impl(
