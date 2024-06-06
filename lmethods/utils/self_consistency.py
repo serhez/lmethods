@@ -68,7 +68,7 @@ def choose_response_via_sc(
     logger: Logger | None = None,
 ) -> tuple[int, Usage]:
     """
-    Choose the best response via Self-Consistency (X. Wang et al., 2022).
+    Choose the best response via Self-Consistency (X. Wang et al., 2022) with recursive binary search.
 
     ### Parameters
     ----------
@@ -83,6 +83,11 @@ def choose_response_via_sc(
     A tuple containing:
     - The index of the chosen response.
     - The usage statistics of the model during Self-Consistency.
+
+    ### Notes
+    ----------
+    Binary search will be performed when `max_n_per_call > len(responses)` by partitioning the set of responses recursively.
+    - This mechanism can be used for large number of responses which do not fit in the context size of the underlying model.
     """
 
     usage = Usage()
