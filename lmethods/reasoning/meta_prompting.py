@@ -214,11 +214,9 @@ class MetaPrompting(Method):
             )
 
             # All other samples are chosen with a high temperature (the model's default temp.)
-            if self._config.self_consistency_n > 1:
+            for i in range(self._config.self_consistency_n - 1):
                 extra_outputs, extra_info = self._model.generate(
-                    inputs,
-                    n_samples=self._config.self_consistency_n - 1,
-                    max_tokens=max_tokens,
+                    inputs, max_tokens=max_tokens
                 )
                 outputs = np.concatenate((outputs, extra_outputs), axis=1)
                 info += extra_info
