@@ -110,7 +110,10 @@ def choose_response_via_sc(
     input = construct_self_consistency_context(context, choices)
     try:
         output, info = model.generate(
-            input, max_tokens=len(str(len(responses))), temperature=0.0
+            input,
+            max_tokens=len(str(len(responses))),
+            temperature=0.0,
+            use_context_template=False,  # we want the old-school inference to get a single number as the next token
         )
         usage += info.usage
         chosen_idx = parse_self_consistency_output(output[0][0])
