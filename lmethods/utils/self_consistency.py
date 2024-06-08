@@ -105,7 +105,7 @@ def choose_response_via_sc(
             chosen_idxs.append(i)
             usage += u
 
-        choices = [responses[i] for i in chosen_idxs]
+        choices = [partitions[i][idx] for i, idx in enumerate(chosen_idxs)]
 
     input = construct_self_consistency_context(context, choices)
     try:
