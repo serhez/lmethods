@@ -293,6 +293,14 @@ class RecursivePrompting(Method):
 
         self._local_usage = Usage()
 
+        self._subproblem_prefixes = [
+            "sub-problem:",
+            "subproblem:",
+            "sub problem:",
+            "problem:",
+        ]
+        self._subproblem_prefixes.extend(BULLET_POINTS_CHARS)
+
     def _add_to_cache(self, problems: _Problem | list[_Problem]):
         if isinstance(problems, RecursivePrompting._Problem):
             problems = [problems]
@@ -718,6 +726,8 @@ class RecursivePrompting(Method):
                 }
             )
             merge = ""
+
+        # Insanity check to avoid infinite loops
         if merge is None:
             self._logger.error(
                 f"[RecursivePrompting.generate] The problem with ID '{problem.id}' was not merged."
@@ -751,10 +761,10 @@ class RecursivePrompting(Method):
 
             line = line.strip()
 
-            for bullet_point in BULLET_POINTS_CHARS:
-                if line.startswith(bullet_point):
+            for prefix in self._subproblem_prefixes:
+                if line.lower().startswith(prefix):
                     # Get rid of the bullet point
-                    line = line[len(bullet_point) :]
+                    line = line[len(prefix) :].strip()
 
                     # Construct the problem
                     p = self._parse_raw_subproblem(line)
@@ -898,7 +908,7 @@ class RecursivePrompting(Method):
         return "".join(
             [
                 f"- Sub-problem {i+1}: {dep.description}"
-                + ("" if not dep.is_solved else f" Answer: {dep.solution}\n")
+                + ("" if not dep.is_solved else f" Sub-solution: {dep.solution}\n")
                 for i, dep in enumerate(
                     [self._problems_cache[id] for id in dependencies]
                 )
