@@ -214,10 +214,10 @@ class Method(ABC):
                     {
                         f"Multiple matches found for the regex '{self._config.answer_regex}'.": None,
                         "Output": output,
-                        "Corrective action": "The first match will be considered as the answer.",
+                        "Corrective action": "The last match will be considered as the answer.",
                     }
                 )
-            answer = match[0]
+            answer = match[-1]
         except Exception:
             self._logger.warn(
                 {
