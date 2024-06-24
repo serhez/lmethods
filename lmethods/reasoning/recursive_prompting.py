@@ -751,17 +751,24 @@ class RecursivePrompting(Method):
         """
 
         subproblems_dict: dict[str, RecursivePrompting._Problem] = {}
+        detected_prefix = None
 
         for line in output.split("\n"):
-            if line.startswith("  "):
+            if any(line.startswith(char) for char in ["  ", "\t"]):
                 self._logger.warn(
-                    "[RecursivePrompting.generate] The output contains a nested list. Only considering the first level of the list."
+                    "[RecursivePrompting.parse_subproblems] The output contains a nested list. Only considering the first level of the list."
                 )
                 continue
 
             line = line.strip()
 
             for prefix in self._subproblem_prefixes:
+                if detected_prefix is not None and detected_prefix != prefix:
+                    self._logger.warn(
+                        f"[RecursivePrompting.parse_subproblems] A different sub-problem prefix was used in the output: '{prefix}'. "
+                        f"The first detected prefix was '{detected_prefix}'. Ignoring the line."
+                    )
+                    continue
                 if line.lower().startswith(prefix):
                     # Get rid of the bullet point
                     line = line[len(prefix) :].strip()
@@ -774,7 +781,7 @@ class RecursivePrompting(Method):
                     # The keys of the dictionary are still the local IDs.
                     if p.id in subproblems_dict:
                         self._logger.warn(
-                            f"[RecursivePrompting.generate] The ID '{p.id}' is repeated in the output. Incoming dependencies will be ignored."
+                            f"[RecursivePrompting.parse_subproblems] The ID '{p.id}' is repeated in the output. Incoming dependencies will be ignored."
                         )
                         local_id = self._id_gen.next()
                         global_id = local_id
@@ -786,11 +793,14 @@ class RecursivePrompting(Method):
                     subproblems_dict[local_id] = p
                     self._add_to_cache(p)
 
+                    # Set the used prefixes to the one used here
+                    detected_prefix = prefix
+
                     break
 
         # Exceeding the maximum width
         if len(subproblems_dict) > self._config.max_width:
-            log_msg = f"[RecursivePrompting.generate] The number of sub-problems ({len(subproblems_dict)}) exceeds the max. width ({self._config.max_width})."
+            log_msg = f"[RecursivePrompting.parse_subproblems] The number of sub-problems ({len(subproblems_dict)}) exceeds the max. width ({self._config.max_width})."
             if self._config.enforce_max_width:
                 log_msg += " Truncating the list of sub-problems to the max. width."
                 self._logger.error(log_msg)
@@ -806,7 +816,7 @@ class RecursivePrompting(Method):
                 self._config.max_nodes - len(self._problems_cache), 0
             )
             self._logger.error(
-                f"[RecursivePrompting.generate] Adding the proposed sub-problems ({len(subproblems_dict)}) "
+                f"[RecursivePrompting.[parse_subproblems]] Adding the proposed sub-problems ({len(subproblems_dict)}) "
                 f"to the existing amount of problems ({len(self._problems_cache)}) would exceed the max. "
                 f"num. of nodes ({self._config.max_nodes}). Only the first {n_accepted_subproblems} "
                 "sub-problems will be considered."
@@ -826,7 +836,7 @@ class RecursivePrompting(Method):
                     global_deps.append(subproblems_dict[dep_local_id].id)
                 else:
                     self._logger.warn(
-                        f"[RecursivePrompting.generate] The dependency '{dep_local_id}' of the problem '{p_local_id}' does not exist. Ignoring the dependency."
+                        f"[RecursivePrompting.parse_subproblems] The dependency '{dep_local_id}' of the problem '{p_local_id}' does not exist. Ignoring the dependency."
                     )
             p.dependencies = global_deps
 
