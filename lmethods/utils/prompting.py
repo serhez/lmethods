@@ -144,7 +144,7 @@ def add_roles_to_context(
         result.append(
             {
                 "role": "system",
-                "message": context[:system_chars],
+                "content": context[:system_chars],
             }
         )
 
@@ -152,20 +152,20 @@ def add_roles_to_context(
         result.append(
             {
                 "role": "user",
-                "message": context[system_chars:-assistant_chars],
+                "content": context[system_chars:-assistant_chars],
             }
         )
         result.append(
             {
                 "role": "assistant",
-                "message": context[-assistant_chars:],
+                "content": context[-assistant_chars:],
             }
         )
     else:
         result.append(
             {
                 "role": "user",
-                "message": context[system_chars:],
+                "content": context[system_chars:],
             }
         )
 
