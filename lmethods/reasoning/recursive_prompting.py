@@ -798,6 +798,7 @@ class RecursivePrompting(Method):
         -------
         A list of the IDs of the sub-problems to be solved.
         - If the list is empty, the problem is a unit problem.
+        - The list may be empty if the maximum width or the maximum number of nodes is exceeded, in which case the problem must be solved directly.
         """
 
         subproblems_dict: dict[str, RecursivePrompting._Problem] = {}
@@ -851,31 +852,20 @@ class RecursivePrompting(Method):
         if len(subproblems_dict) > self._config.max_width:
             log_msg = f"[RecursivePrompting.parse_subproblems] The number of sub-problems ({len(subproblems_dict)}) exceeds the max. width ({self._config.max_width})."
             if self._config.enforce_max_width:
-                log_msg += " Truncating the list of sub-problems to the max. width."
+                log_msg += " The problem will be solved directly."
                 self._logger.error(log_msg)
-                subproblems_dict = dict(
-                    list(subproblems_dict.items())[: self._config.max_width]
-                )
+                return []
             else:
                 self._logger.warn(log_msg)
 
         # Exceeding the maximum number of nodes
         elif len(subproblems_dict) + len(self._problems_cache) > self._config.max_nodes:
-            n_accepted_subproblems = max(
-                self._config.max_nodes - len(self._problems_cache), 0
-            )
             self._logger.error(
                 f"[RecursivePrompting.[parse_subproblems]] Adding the proposed sub-problems ({len(subproblems_dict)}) "
                 f"to the existing amount of problems ({len(self._problems_cache)}) would exceed the max. "
-                f"num. of nodes ({self._config.max_nodes}). Only the first {n_accepted_subproblems} "
-                "sub-problems will be considered."
+                f"num. of nodes ({self._config.max_nodes}). The problem will be solved directly."
             )
-            if n_accepted_subproblems < 1:
-                subproblems_dict = {}
-            else:
-                subproblems_dict = dict(
-                    list(subproblems_dict.items())[:n_accepted_subproblems]
-                )
+            return []
 
         # Substitute the local IDs with the global IDs in the dependencies
         for p_local_id, p in subproblems_dict.items():
