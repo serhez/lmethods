@@ -7,6 +7,7 @@ from .prompting import (
     BULLET_POINTS_CHARS,
     END_CHARS,
     BaseShotsCollection,
+    add_roles_to_context,
     construct_shots_str,
     read_prompt,
 )
@@ -28,6 +29,7 @@ __all__ = [
     "GuardedValue",
     "BaseShotsCollection",
     "Usage",
+    "add_roles_to_context",
     "read_prompt",
     "construct_shots_str",
     "choose_response_via_sc",

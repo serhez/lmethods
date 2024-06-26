@@ -121,3 +121,52 @@ def construct_shots_str(shots: list[tuple[str, str]]) -> str:
         shots_str += f"Answer:{sep}{shot[1]}{'' if any(shot[1].endswith(c) for c in END_CHARS) else '.'}\n\n"
 
     return shots_str
+
+
+def add_roles_to_context(
+    context: str, system_chars: int = 0, assistant_chars: int = 0
+) -> list[dict[str, str]]:
+    """
+    Add role messages to the context, as specified by `Config.last_chars_as_assistant` and `Config.first_chars_as_system`.
+
+    ### Parameters
+    ----------
+    `context`: the context to add the role messages to.
+
+    ### Returns
+    ----------
+    The context with the role messages added.
+    """
+
+    result = []
+
+    if system_chars > 0:
+        result.append(
+            {
+                "role": "system",
+                "message": context[:system_chars],
+            }
+        )
+
+    if assistant_chars > 0:
+        result.append(
+            {
+                "role": "user",
+                "message": context[system_chars:-assistant_chars],
+            }
+        )
+        result.append(
+            {
+                "role": "assistant",
+                "message": context[-assistant_chars:],
+            }
+        )
+    else:
+        result.append(
+            {
+                "role": "user",
+                "message": context[system_chars:],
+            }
+        )
+
+    return result
