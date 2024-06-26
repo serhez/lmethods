@@ -14,6 +14,7 @@ from lmethods.utils import (
     DependencySyntax,
     IDGenerator,
     Usage,
+    add_roles_to_context,
     classproperty,
     construct_shots_str,
     read_prompt,
@@ -84,6 +85,30 @@ class RecursivePrompting(Method):
 
         merge_prompt_path: str
         """The path to the meta-prompt used to combine solutions to sub-problems to solve the original problem."""
+
+        unit_first_chars_as_system: int = 0
+        """The amount of characters from the beginning of the unit context that will be passed to the model with the role of 'system'."""
+
+        unit_last_chars_as_assistant: int = 0
+        """The amount of characters from the end of the unit context that will be passed to the model with the role of 'assistant'."""
+
+        split_first_chars_as_system: int = 0
+        """The amount of characters from the beginning of the split context that will be passed to the model with the role of 'system'."""
+
+        split_last_chars_as_assistant: int = 0
+        """The amount of characters from the end of the split context that will be passed to the model with the role of 'assistant'."""
+
+        instructions_first_chars_as_system: int = 0
+        """The amount of characters from the beginning of the instructions context that will be passed to the model with the role of 'system'."""
+
+        instructions_last_chars_as_assistant: int = 0
+        """The amount of characters from the end of the instructions context that will be passed to the model with the role of 'assistant'."""
+
+        merge_first_chars_as_system: int = 0
+        """The amount of characters from the beginning of the merge context that will be passed to the model with the role of 'system'."""
+
+        merge_last_chars_as_assistant: int = 0
+        """The amount of characters from the end of the merge context that will be passed to the model with the role of 'assistant'."""
 
         graph_file_path: str | None = None
         """
@@ -535,7 +560,7 @@ class RecursivePrompting(Method):
 
     def _construct_unit_context(
         self, problem: _Problem, shots_collection: ShotsCollection
-    ) -> str:
+    ) -> list[dict[str, str]]:
         """
         Constructs the context to solve a unit problem.
 
@@ -563,11 +588,21 @@ class RecursivePrompting(Method):
                 instructions="",
                 shots=construct_shots_str(shots_collection.merge),
             ).strip()
+            context = add_roles_to_context(
+                context,
+                system_chars=self._config.merge_first_chars_as_system,
+                assistant_chars=self._config.merge_last_chars_as_assistant,
+            )
         else:
             context = self._unit_prompt.format(
                 problem=problem.description,
                 shots=construct_shots_str(shots_collection.unit),
             ).strip()
+            context = add_roles_to_context(
+                context,
+                system_chars=self._config.unit_first_chars_as_system,
+                assistant_chars=self._config.unit_last_chars_as_assistant,
+            )
 
         return context
 
@@ -592,6 +627,11 @@ class RecursivePrompting(Method):
             width=n2w.convert(self._config.max_width),
             shots=shots_str,
         ).strip()
+        split_prompt = add_roles_to_context(
+            split_prompt,
+            system_chars=self._config.split_first_chars_as_system,
+            assistant_chars=self._config.split_last_chars_as_assistant,
+        )
 
         try:
             output, info = self._model.generate(
@@ -656,6 +696,11 @@ class RecursivePrompting(Method):
         instructions_prompt = self._instructions_prompt.format(
             problem=problem.description, subproblems=deps_str, shots=shots_str
         ).strip()
+        instructions_prompt = add_roles_to_context(
+            instructions_prompt,
+            system_chars=self._config.instructions_first_chars_as_system,
+            assistant_chars=self._config.instructions_last_chars_as_assistant,
+        )
 
         try:
             output, info = self._model.generate(
@@ -709,6 +754,11 @@ class RecursivePrompting(Method):
             instructions=instructions,
             shots=shots_str,
         ).strip()
+        merge_prompt = add_roles_to_context(
+            merge_prompt,
+            system_chars=self._config.merge_first_chars_as_system,
+            assistant_chars=self._config.merge_last_chars_as_assistant,
+        )
 
         try:
             output, info = self._model.generate(
@@ -763,14 +813,17 @@ class RecursivePrompting(Method):
             line = line.strip()
 
             for prefix in self._subproblem_prefixes:
-                if detected_prefix is not None and detected_prefix != prefix:
-                    self._logger.warn(
-                        f"[RecursivePrompting.parse_subproblems] A different sub-problem prefix was used in the output: '{prefix}'. "
-                        f"The first detected prefix was '{detected_prefix}'. Ignoring the line."
-                    )
-                    continue
                 if line.lower().startswith(prefix):
-                    # Get rid of the bullet point
+                    if detected_prefix is not None and detected_prefix != prefix:
+                        self._logger.warn(
+                            f"[RecursivePrompting.parse_subproblems] A different sub-problem prefix was used in the output: '{prefix}'. "
+                            f"The first detected prefix was '{detected_prefix}'. Ignoring the line."
+                        )
+                        continue
+                    elif detected_prefix is None:
+                        detected_prefix = prefix
+
+                    # Get rid of the prefix
                     line = line[len(prefix) :].strip()
 
                     # Construct the problem
@@ -791,10 +844,6 @@ class RecursivePrompting(Method):
 
                     p.id = global_id
                     subproblems_dict[local_id] = p
-                    self._add_to_cache(p)
-
-                    # Set the used prefixes to the one used here
-                    detected_prefix = prefix
 
                     break
 
@@ -836,9 +885,14 @@ class RecursivePrompting(Method):
                     global_deps.append(subproblems_dict[dep_local_id].id)
                 else:
                     self._logger.warn(
-                        f"[RecursivePrompting.parse_subproblems] The dependency '{dep_local_id}' of the problem '{p_local_id}' does not exist. Ignoring the dependency."
+                        f"[RecursivePrompting.parse_subproblems] The dependency '{dep_local_id}' of the problem '{p_local_id}' does not exist. "
+                        "It may have been removed if the maximum num. of nodes was exceeded. Ignoring the dependency."
                     )
             p.dependencies = global_deps
+
+        # Add the sub-problems to the cache
+        for p in subproblems_dict.values():
+            self._add_to_cache(p)
 
         return [p.id for p in list(subproblems_dict.values())]
 
