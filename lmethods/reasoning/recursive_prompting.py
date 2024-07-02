@@ -114,7 +114,7 @@ class RecursivePrompting(Method):
         """
         The path to the file where the graph of the problem-solving process will be saved.
         This is a JSON file that can be used to visualize the problem-solving process.
-        The graph will be saved only if the path is provided.
+        The graph will be saved only if the path is provided (i.e., the value is not `None`).
         The JSON file will be structured as an array of graphs (one per problem solved via calls to `generate`).
         Each graph will be a dictionary with the following keys:
         - `root_id`: the ID of the root problem.
@@ -175,7 +175,8 @@ class RecursivePrompting(Method):
 
         def __init__(
             self,
-            id: str,
+            uid: str,
+            lid: str,
             description: str,
             dependencies: list[str] | None = None,
             solution: str | None = None,
@@ -185,7 +186,9 @@ class RecursivePrompting(Method):
 
             ### Parameters
             ----------
-            `id`: the ID of the problem.
+            `uid`: the unique global ID of the problem.
+            `lid`: the local ID of the problem in the context of its parents and children in the decomposition graph.
+            - This ID may not be unique within the whole graph.
             `description`: the description of the problem.
             `dependencies`: the IDs of the problems that this problem depends on.
             `solution`: the solution to the problem.
@@ -197,7 +200,8 @@ class RecursivePrompting(Method):
             - The solution will be punctuated if it is not already.
             """
 
-            self._id = id
+            self._uid = uid
+            self._lid = lid
 
             if dependencies is None:
                 self._dependencies = []
@@ -213,16 +217,31 @@ class RecursivePrompting(Method):
                 self._solution = f"{self._solution}{'' if any(self._solution.endswith(c) for c in END_CHARS) else '.'}"
 
         @property
-        def id(self) -> str:
-            """The ID of the problem."""
+        def uid(self) -> str:
+            """The unique global ID of the problem."""
 
-            return self._id
+            return self._uid
 
-        @id.setter
-        def id(self, value: str):
-            """Set the ID of the problem."""
+        @uid.setter
+        def uid(self, value: str):
+            """Set the global ID of the problem."""
 
-            self._id = value
+            self._uid = value
+
+        @property
+        def lid(self) -> str:
+            """
+            The local ID of the problem in the context of its parents and children in the decomposition graph.
+            This ID may not be unique within the whole graph.
+            """
+
+            return self._lid
+
+        @lid.setter
+        def lid(self, value: str):
+            """Set the local ID of the problem."""
+
+            self._lid = value
 
         @property
         def description(self) -> str:
@@ -331,11 +350,11 @@ class RecursivePrompting(Method):
             problems = [problems]
 
         for problem in problems:
-            if problem.id in self._problems_cache:
+            if problem.uid in self._problems_cache:
                 raise ValueError(
-                    f"[RecursivePrompting.generate] The problem with ID '{problem.id}' is already in the cache."
+                    f"[RecursivePrompting.generate] The problem with UID '{problem.uid}' is already in the cache."
                 )
-            self._problems_cache[problem.id] = problem
+            self._problems_cache[problem.uid] = problem
 
     def _reset_state(self):
         self._problems_cache = {}
@@ -348,7 +367,8 @@ class RecursivePrompting(Method):
         shots: ShotsCollection = ShotsCollection(),
         max_tokens: int = 500,
     ) -> tuple[str, Method.GenerationInfo]:
-        problem = RecursivePrompting._Problem(self._id_gen.next(), context)
+        root_id = self._id_gen.next()
+        problem = RecursivePrompting._Problem(root_id, root_id, context)
         self._add_to_cache(problem)
 
         self._solve(problem, 1, shots)
@@ -364,7 +384,7 @@ class RecursivePrompting(Method):
 
         # Save the graph
         if self._config.graph_file_path is not None:
-            graph_dict = self._generate_graph(problem.id)
+            graph_dict = self._generate_graph(root_id)
 
             try:
                 with open(self._config.graph_file_path, "r") as file:
@@ -379,7 +399,7 @@ class RecursivePrompting(Method):
         self._logger.debug(
             {
                 "[RecursivePrompting.generate]": None,
-                "Root ID": problem.id,
+                "Root ID": root_id,
                 "Context": context,
                 "Max. tokens": max_tokens,
                 "Output": output,
@@ -419,7 +439,7 @@ class RecursivePrompting(Method):
                 )
                 if output[0][0] is None:
                     self._logger.error(
-                        f"[RecursivePrompting.generate:max_depth] The problem with ID '{problem.id}' was not solved."
+                        f"[RecursivePrompting.generate:max_depth] The problem with UID '{problem.uid}' was not solved."
                     )
                     problem.solution = ""
                 else:
@@ -429,7 +449,7 @@ class RecursivePrompting(Method):
             except Exception as e:
                 self._logger.error(
                     {
-                        f"[RecursivePrompting.generate:max_depth] The problem with ID '{problem.id}' could not be solved": None,
+                        f"[RecursivePrompting.generate:max_depth] The problem with UID '{problem.uid}' could not be solved": None,
                         "Error source": "model",
                         "Error message": str(e),
                     }
@@ -439,7 +459,7 @@ class RecursivePrompting(Method):
 
             if not problem.is_solved:
                 self._logger.error(
-                    f"[RecursivePrompting.generate:max_budget] The problem with ID '{problem.id}' was not solved."
+                    f"[RecursivePrompting.generate:max_budget] The problem with UID '{problem.uid}' was not solved."
                 )
                 problem.solution = ""
 
@@ -449,7 +469,7 @@ class RecursivePrompting(Method):
                     "Depth": depth,
                     "N. of nodes": len(self._problems_cache),
                     "Model output": output[0][0],
-                    "Problem ID": problem.id,
+                    "Problem UID": problem.uid,
                     "Problem desc.": problem.description,
                     "Problem sol.": problem.solution,
                 }
@@ -469,7 +489,7 @@ class RecursivePrompting(Method):
                 )
                 if output[0][0] is None:
                     self._logger.error(
-                        f"[RecursivePrompting.generate:unit] The problem with ID '{problem.id}' was not solved."
+                        f"[RecursivePrompting.generate:unit] The problem with UID '{problem.uid}' was not solved."
                     )
                     problem.solution = ""
                 else:
@@ -479,7 +499,7 @@ class RecursivePrompting(Method):
             except Exception as e:
                 self._logger.error(
                     {
-                        f"[RecursivePrompting.generate:unit] The problem with ID '{problem.id}' could not be solved": None,
+                        f"[RecursivePrompting.generate:unit] The problem with UID '{problem.uid}' could not be solved": None,
                         "Error source": "model",
                         "Error message": str(e),
                     }
@@ -489,7 +509,7 @@ class RecursivePrompting(Method):
 
             if not problem.is_solved:
                 self._logger.error(
-                    f"[RecursivePrompting.generate:unit] The problem with ID '{problem.id}' was not solved."
+                    f"[RecursivePrompting.generate:unit] The problem with UID '{problem.uid}' was not solved."
                 )
                 problem.solution = ""
 
@@ -498,7 +518,7 @@ class RecursivePrompting(Method):
                     "[RecursivePrompting.generate:unit]": None,
                     "Depth": depth,
                     "Model output": output[0][0],
-                    "Problem ID": problem.id,
+                    "Problem UID": problem.uid,
                     "Problem desc.": problem.description,
                     "Problem sol.": problem.solution,
                 }
@@ -545,7 +565,7 @@ class RecursivePrompting(Method):
             {
                 "[RecursivePrompting.generate:complex]": None,
                 "Depth": depth,
-                "Problem ID": problem.id,
+                "Problem UID": problem.uid,
                 "Problem desc.": problem.description,
                 "Problem sol.": problem.solution,
                 "Sub-problems desc.": [
@@ -643,7 +663,7 @@ class RecursivePrompting(Method):
         except Exception as e:
             self._logger.error(
                 {
-                    f"[RecursivePrompting.generate:split] The problem with ID '{problem.id}' could not be split": None,
+                    f"[RecursivePrompting.generate:split] The problem with UID '{problem.uid}' could not be split": None,
                     "Error source": "model",
                     "Error message": str(e),
                 }
@@ -651,7 +671,7 @@ class RecursivePrompting(Method):
             split = ""
         if split is None:
             self._logger.error(
-                f"[RecursivePrompting.generate] The problem with ID '{problem.id}' was not split."
+                f"[RecursivePrompting.generate] The problem with UID '{problem.uid}' was not split."
             )
             split = ""
 
@@ -712,7 +732,7 @@ class RecursivePrompting(Method):
         except Exception as e:
             self._logger.error(
                 {
-                    f"[RecursivePrompting.generate:instructions] The problem with ID '{problem.id}' could not generate instructions": None,
+                    f"[RecursivePrompting.generate:instructions] The problem with UID '{problem.uid}' could not generate instructions": None,
                     "Error source": "model",
                     "Error message": str(e),
                 }
@@ -720,7 +740,7 @@ class RecursivePrompting(Method):
             instructions = ""
         if instructions is None:
             self._logger.error(
-                f"[RecursivePrompting.generate] Instructions for the problem with ID '{problem.id}' were not generated."
+                f"[RecursivePrompting.generate] Instructions for the problem with UID '{problem.uid}' were not generated."
             )
             instructions = ""
 
@@ -770,7 +790,7 @@ class RecursivePrompting(Method):
         except Exception as e:
             self._logger.error(
                 {
-                    f"[RecursivePrompting.generate:merge] The problem with ID '{problem.id}' could not be merged": None,
+                    f"[RecursivePrompting.generate:merge] The problem with UID '{problem.uid}' could not be merged": None,
                     "Error source": "model",
                     "Error message": str(e),
                 }
@@ -780,7 +800,7 @@ class RecursivePrompting(Method):
         # Insanity check to avoid infinite loops
         if merge is None:
             self._logger.error(
-                f"[RecursivePrompting.generate] The problem with ID '{problem.id}' was not merged."
+                f"[RecursivePrompting.generate] The problem with UID '{problem.uid}' was not merged."
             )
             merge = ""
 
@@ -801,7 +821,9 @@ class RecursivePrompting(Method):
         - The list may be empty if the maximum width or the maximum number of nodes is exceeded, in which case the problem must be solved directly.
         """
 
+        # The dictionary with the local IDs as keys, in order to correctly work out the dependencies
         subproblems_dict: dict[str, RecursivePrompting._Problem] = {}
+
         detected_prefix = None
 
         for line in output.split("\n"):
@@ -833,18 +855,13 @@ class RecursivePrompting(Method):
                     # Create global IDs; this is necessary because the IDs generated
                     # by the model are likely to repeat across independent splitting steps.
                     # The keys of the dictionary are still the local IDs.
-                    if p.id in subproblems_dict:
+                    if p.lid in subproblems_dict:
                         self._logger.warn(
-                            f"[RecursivePrompting.parse_subproblems] The ID '{p.id}' is repeated in the output. Incoming dependencies will be ignored."
+                            f"[RecursivePrompting.parse_subproblems] The local ID '{p.lid}' is repeated in the output. Incoming dependencies will be ignored."
                         )
-                        local_id = self._id_gen.next()
-                        global_id = local_id
-                    else:
-                        local_id = p.id
-                        global_id = self._id_gen.next()
+                        p.lid = p.uid
 
-                    p.id = global_id
-                    subproblems_dict[local_id] = p
+                    subproblems_dict[p.lid] = p
 
                     break
 
@@ -872,10 +889,11 @@ class RecursivePrompting(Method):
             global_deps = []
             for dep_local_id in p.dependencies:
                 if dep_local_id in subproblems_dict:
-                    global_deps.append(subproblems_dict[dep_local_id].id)
+                    global_deps.append(subproblems_dict[dep_local_id].uid)
                 else:
                     self._logger.warn(
-                        f"[RecursivePrompting.parse_subproblems] The dependency '{dep_local_id}' of the problem '{p_local_id}' does not exist. "
+                        f"[RecursivePrompting.parse_subproblems] The dependency with local ID '{dep_local_id}' "
+                        "of the problem with local ID '{p_local_id}' does not exist. "
                         "It may have been removed if the maximum num. of nodes was exceeded. Ignoring the dependency."
                     )
             p.dependencies = global_deps
@@ -884,7 +902,7 @@ class RecursivePrompting(Method):
         for p in subproblems_dict.values():
             self._add_to_cache(p)
 
-        return [p.id for p in list(subproblems_dict.values())]
+        return [p.uid for p in list(subproblems_dict.values())]
 
     def _parse_raw_subproblem(self, raw_problem: str) -> _Problem:
         """
@@ -902,15 +920,16 @@ class RecursivePrompting(Method):
         ----------
         - The raw sub-problem is expected to NOT contain the initial bullet point character.
         - The raw sub-problem will be stripped of surrounding whitespace.
-        - The sub-problem is also stored in the cache.
+        - The sub-problem is NOT stored in the cache.
         - The parsing will be done according to `Config.dependency_syntax`.
+        - The dependencies will be referred to by their local IDs (`lid`); you likely want to then replace these with their global IDs (`uid`).
         """
 
         # Get rid of surrounding whitespace
         raw_problem = raw_problem.strip()
 
         if self._config.dependency_syntax == DependencySyntax.NONE:
-            id = self._id_gen.random()
+            uid = lid = self._id_gen.next()
             desc = raw_problem
             deps_ids = []
 
@@ -918,17 +937,18 @@ class RecursivePrompting(Method):
             desc = raw_problem
 
             # ID
+            uid = self._id_gen.random()
             try:
                 if not desc.startswith("["):
                     raise ValueError
                 right_bracket_i = desc.index("]")
-                id = desc[1:right_bracket_i]
+                lid = desc[1:right_bracket_i]
                 desc = desc[right_bracket_i + 1 :]
             except ValueError:
                 self._logger.error(
                     "[RecursivePrompting.generate] The ID of the problem could not be found for dependency syntax 'BRACKETS_PARENS'."
                 )
-                id = self._id_gen.random()
+                lid = uid
 
             # Dependencies
             try:
@@ -953,7 +973,7 @@ class RecursivePrompting(Method):
                 "The specified dependency syntax is not implemented."
             )
 
-        return RecursivePrompting._Problem(id, desc, deps_ids)
+        return RecursivePrompting._Problem(uid, lid, desc, deps_ids)
 
     def _construct_dependencies_str(self, dependencies: list[str]) -> str:
         if len(dependencies) == 0:
@@ -961,11 +981,9 @@ class RecursivePrompting(Method):
 
         return "".join(
             [
-                f"- Sub-problem {i+1}: {dep.description}"
+                f"- Sub-problem {dep.lid}: {dep.description}"
                 + ("" if not dep.is_solved else f" Sub-solution: {dep.solution}\n")
-                for i, dep in enumerate(
-                    [self._problems_cache[id] for id in dependencies]
-                )
+                for dep in [self._problems_cache[id] for id in dependencies]
             ]
         )[:-1]
 
