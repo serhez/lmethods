@@ -11,6 +11,7 @@ from lmethods.protocols import Dataset, Logger, Model
 from lmethods.utils import (
     BaseShotsCollection,
     Usage,
+    add_roles_to_context,
     choose_response_via_sc,
     classproperty,
     construct_shots_str,
@@ -48,6 +49,12 @@ class MetaPrompting(Method):
         If multiple calls are needed, binary search will be used to find the best response.
         The value must be greater than or equal to 2.
         """
+
+        first_chars_as_system: int = 0
+        """The amount of characters from the beginning of the context that will be passed to the model with the role of 'system'."""
+
+        last_chars_as_assistant: int = 0
+        """The amount of characters from the end of the context that will be passed to the model with the role of 'assistant'."""
 
         def __post_init__(self):
             if self.self_consistency_n < 1:
@@ -205,7 +212,14 @@ class MetaPrompting(Method):
         sc_usage = Usage()
         shots_str = construct_shots_str(shots.solve)
 
-        inputs = [[self._prompt.format(problem=c, shots=shots_str)] for c in context]
+        inputs = [
+            add_roles_to_context(
+                self._prompt.format(problem=c, shots=shots_str),
+                system_chars=self._config.first_chars_as_system,
+                assistant_chars=self._config.last_chars_as_assistant,
+            )
+            for c in context
+        ]
 
         try:
             # One sample is chosen with a low temperature (0.0)
@@ -281,7 +295,11 @@ class MetaPrompting(Method):
         sc_usage = Usage()
         shots_str = construct_shots_str(shots.solve)
 
-        input = self._prompt.format(problem=context, shots=shots_str)
+        input = add_roles_to_context(
+            self._prompt.format(problem=context, shots=shots_str),
+            system_chars=self._config.first_chars_as_system,
+            assistant_chars=self._config.last_chars_as_assistant,
+        )
 
         try:
             output, info = self._model.generate(
