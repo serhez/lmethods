@@ -441,123 +441,74 @@ class RecursivePrompting(Method):
 
         return output, Method.GenerationInfo(usage=self._local_usage)
 
-    def _split_or_solve(
-        self,
-        problem: _Problem,
-        depth: int,
-        shots: ShotsCollection = ShotsCollection(),
-    ) -> tuple[list[str], str]:
-        """
-        Split a problem into sub-problems or solve it directly.
-
-        ### Parameters
-        ----------
-        `problem`: the problem to be split or solved.
-        `depth`: the current depth of the recursion.
-        `shots`: a shots collection to use for in-context learning.
-        - If empty at any stage, the method will not use in-context learning (i.e., zero-shot).
-
-        ### Returns
-        -------
-        A tuple with the IDs of the sub-problems to be solved and the instructions to merge the sub-solutions.
-        """
-
-        # If the max. depth or the max. num. of nodes are reached, solve the problem directly
-        if (
-            depth >= self._config.max_depth
-            or len(self._problems_cache) >= self._config.max_nodes
-        ):
-            self._solve_directly(problem, shots, depth)
-            return [], ""
-
-        # Split the problem into sub-problems
-        subproblems_ids = self._split(problem, shots.split)
-
-        # If it is a unit problem, solve it
-        if len(subproblems_ids) == 0:
-            self._solve_directly(problem, shots, depth)
-            return [], ""
-
-        # Obtain merging instructions
-        if self._config.elicit_instructions:
-            instructions = self._get_instructions(problem, shots.instructions)
-        else:
-            instructions = ""
-
-        return subproblems_ids, instructions
-
     def _solve_dfs(
         self,
         problem: _Problem,
         depth: int,
         shots: ShotsCollection = ShotsCollection(),
+        visited: set[str] = set(),
         only_merge: bool = False,
     ):
         """
         Solves a problem using recursive prompting via the DFS strategy and stores the solution in the problem object.
+        The method will split the problem into sub-problems while traversing the graph if `only_merge` is `False`; otherwise, it will only unit-solve and merge the graph.
 
         ### Parameters
         ----------
         `problem`: the problem to be solved.
         `depth`: the current depth of the recursion.
-        `subproblems_ids`: the IDs of the sub-problems to be solved.
-        `instructions`: the instructions to merge the sub-solutions.
         `shots`: a shots collection to use for in-context learning.
         - If empty at any stage, the method will not use in-context learning (i.e., zero-shot).
+        `visited`: the set of IDs of the problems that have already been visited via DFS.
         `only_merge`: whether to only merge the sub-solutions to solve the original problem.
         - If `True`, the method will not attempt to split the problem into sub-problems.
-
-        ### Notes
-        ----------
-        - This method can be used to only merge (no splitting attempted) all problems in the graph starting from the leaves if `only_merge` is `True`.
         """
 
-        if not only_merge:
-            subproblems_ids, instructions = self._split_or_solve(problem, depth, shots)
+        mode = "merge" if only_merge else "dfs"
 
-        # Solve each sub-problem recursively
+        if problem.uid in visited:
+            raise RuntimeError(
+                f"[RecursivePrompting.generate:{mode}] The dependencies of the sub-problems contain a cycle."
+            )
+        visited.add(problem.uid)
+
+        if not only_merge:
+            self._split_or_solve(problem, depth, shots)
+
+        # Solve each sub-problem recursively (if any)
         while any(
             [
                 not self._problems_cache[dep_id].is_solved
                 for dep_id in problem.dependencies
             ]
         ):
-            to_solve = []
-
-            for dep_id in problem.dependencies:
-                if not self._problems_cache[dep_id].is_solved and all(
-                    self._problems_cache[subdep_id].is_solved
-                    for subdep_id in self._problems_cache[dep_id].dependencies
-                ):
-                    to_solve.append(dep_id)
-
-            if len(to_solve) == 0:
-                raise RuntimeError(
-                    "[RecursivePrompting.generate] The dependencies of the sub-problems contain a cycle."
+            # TODO: we can solve sub-problems in parallel here
+            for dep_id in [
+                id
+                for id in problem.dependencies
+                if not self._problems_cache[id].is_solved
+            ]:
+                self._solve_dfs(
+                    self._problems_cache[dep_id], depth + 1, shots, visited, only_merge
                 )
-
-            for dep_id in to_solve:
-                # TODO: we can solve sub-problems in parallel here
-                dep = self._problems_cache[dep_id]
-                self._solve_dfs(dep, depth + 1, shots)
 
         # Merge the sub-solutions
         self._solve_directly(problem, shots, depth)
 
         self._logger.debug(
             {
-                "[RecursivePrompting.generate:complex]": None,
+                f"[RecursivePrompting.generate:{mode}]": None,
                 "Depth": depth,
                 "Problem UID": problem.uid,
                 "Problem desc.": problem.description,
                 "Problem sol.": problem.solution,
                 "Sub-problems desc.": [
-                    self._problems_cache[id].description for id in subproblems_ids
+                    self._problems_cache[id].description for id in problem.dependencies
                 ],
                 "Sub-problems sol.": [
-                    self._problems_cache[id].solution for id in subproblems_ids
+                    self._problems_cache[id].solution for id in problem.dependencies
                 ],
-                "Instructions": instructions,
+                "Instructions": problem.instructions,
             }
         )
 
@@ -578,10 +529,10 @@ class RecursivePrompting(Method):
         - If empty at any stage, the method will not use in-context learning (i.e., zero-shot).
         """
 
-        subproblems_ids, instructions = self._split_or_solve(problem, 0, shots)
+        self._split_or_solve(problem, 0, shots)
 
         unsolved = Queue()
-        for dep_id in subproblems_ids:
+        for dep_id in problem.dependencies:
             unsolved.put(dep_id)
 
         # Split (or solve directly if necessary) the sub-problems using BFS
@@ -594,14 +545,14 @@ class RecursivePrompting(Method):
                 self._split_or_solve(dep, 0, shots)
             else:
                 raise RuntimeError(
-                    "[RecursivePrompting.generate] The dependencies of the sub-problems contain a cycle."
+                    "[RecursivePrompting.generate:bfs] The dependencies of the sub-problems contain a cycle."
                 )
 
             for subdep_id in dep.dependencies:
                 if not self._problems_cache[subdep_id].is_solved:
                     unsolved.put(subdep_id)
 
-        # Merge all problems in the graph starting from the leaves
+        # Merge all problems in the graph recursively
         self._solve_dfs(problem, 1, shots, only_merge=True)
 
         self._logger.debug(
@@ -611,14 +562,147 @@ class RecursivePrompting(Method):
                 "Problem desc.": problem.description,
                 "Problem sol.": problem.solution,
                 "Sub-problems desc.": [
-                    self._problems_cache[id].description for id in subproblems_ids
+                    self._problems_cache[id].description for id in problem.dependencies
                 ],
                 "Sub-problems sol.": [
-                    self._problems_cache[id].solution for id in subproblems_ids
+                    self._problems_cache[id].solution for id in problem.dependencies
                 ],
-                "Instructions": instructions,
+                "Instructions": problem.instructions,
             }
         )
+
+    def _split_or_solve(
+        self,
+        problem: _Problem,
+        depth: int,
+        shots: ShotsCollection = ShotsCollection(),
+    ):
+        """
+        Split a problem into sub-problems or solve it directly.
+
+        ### Parameters
+        ----------
+        `problem`: the problem to be split or solved.
+        `depth`: the current depth of the recursion.
+        `shots`: a shots collection to use for in-context learning.
+        - If empty at any stage, the method will not use in-context learning (i.e., zero-shot).
+        """
+
+        # If the max. depth or the max. num. of nodes are reached, solve the problem directly
+        if (
+            depth >= self._config.max_depth
+            or len(self._problems_cache) >= self._config.max_nodes
+        ):
+            self._solve_directly(problem, shots, depth)
+            return
+
+        # Split the problem into sub-problems
+        shots_str = construct_shots_str(shots.split)
+
+        split_prompt = self._split_prompt.format(
+            problem=problem.description,
+            width=n2w.convert(self._config.max_width),
+            shots=shots_str,
+        ).strip()
+        split_prompt = add_roles_to_context(
+            split_prompt,
+            system_chars=self._config.split_first_chars_as_system,
+            assistant_chars=self._config.split_last_chars_as_assistant,
+        )
+
+        try:
+            output, info = self._model.generate(
+                split_prompt, max_tokens=self._config.max_internal_tokens
+            )
+            split = self._extract_answer(output[0][0])
+            self._local_usage += info.usage
+            self.usage += info.usage
+        except Exception as e:
+            self._logger.error(
+                {
+                    f"[RecursivePrompting.generate:split] The problem with UID '{problem.uid}' could not be split": None,
+                    "Error source": "model",
+                    "Error message": str(e),
+                }
+            )
+            split = ""
+        if split is None:
+            self._logger.error(
+                f"[RecursivePrompting.generate] The problem with UID '{problem.uid}' was not split."
+            )
+            split = ""
+
+        subproblems_ids = self._parse_subproblems(split)
+
+        problem.dependencies.extend(subproblems_ids)
+
+        # If it is a unit problem, solve it
+        if len(subproblems_ids) == 0:
+            self._solve_directly(problem, shots, depth)
+            return
+
+        # Obtain merging instructions
+        if self._config.elicit_instructions:
+            self._set_instructions(problem, shots.instructions)
+
+    def _set_instructions(self, problem: _Problem, shots: list[tuple[str, str]] = []):
+        """
+        Generate instructions to merge sub-solutions.
+
+        ### Parameters
+        ----------
+        `problem`: the original problem.
+        `subproblems`: the sub-problems to be solved.
+
+        ### Raises
+        -------
+        `RuntimeError`: if the method is configured to elicit instructions, but no instructions prompt is provided.
+
+        ### Notes
+        ----------
+        - The method will not generate instructions if `Config.elicit_instructions` is `False`.
+        """
+
+        shots_str = construct_shots_str(shots)
+        deps_str = self._construct_dependencies_str(problem.dependencies)
+
+        if self._instructions_prompt is None:
+            raise RuntimeError(
+                "[RecursivePrompting.generate:instructions] The method is configured to elicit instructions, but no instructions prompt is provided."
+            )
+
+        instructions_prompt = self._instructions_prompt.format(
+            problem=problem.description, subproblems=deps_str, shots=shots_str
+        ).strip()
+        instructions_prompt = add_roles_to_context(
+            instructions_prompt,
+            system_chars=self._config.instructions_first_chars_as_system,
+            assistant_chars=self._config.instructions_last_chars_as_assistant,
+        )
+
+        try:
+            output, info = self._model.generate(
+                instructions_prompt, max_tokens=self._config.max_internal_tokens
+            )
+            instructions = self._extract_answer(output[0][0])
+            self._local_usage += info.usage
+            self.usage += info.usage
+        except Exception as e:
+            self._logger.error(
+                {
+                    f"[RecursivePrompting.generate:instructions] The problem with UID '{problem.uid}' could not generate instructions": None,
+                    "Error source": "model",
+                    "Error message": str(e),
+                }
+            )
+            instructions = ""
+        if instructions is None:
+            self._logger.error(
+                f"[RecursivePrompting.generate] Instructions for the problem with UID '{problem.uid}' were not generated."
+            )
+            instructions = ""
+
+        problem.instructions = instructions
 
     def _solve_directly(self, problem: _Problem, shots: ShotsCollection, depth: int):
         """
@@ -732,128 +816,6 @@ class RecursivePrompting(Method):
 
         return context
 
-    def _split(self, problem: _Problem, shots: list[tuple[str, str]] = []) -> list[str]:
-        """
-        Split a problem into sub-problems.
-
-        ### Parameters
-        ----------
-        `problem`: the problem to be split.
-
-        ### Returns
-        -------
-        A list of the IDs of the sub-problems to be solved.
-        - If the list is empty, the problem is a unit problem.
-        """
-
-        shots_str = construct_shots_str(shots)
-
-        split_prompt = self._split_prompt.format(
-            problem=problem.description,
-            width=n2w.convert(self._config.max_width),
-            shots=shots_str,
-        ).strip()
-        split_prompt = add_roles_to_context(
-            split_prompt,
-            system_chars=self._config.split_first_chars_as_system,
-            assistant_chars=self._config.split_last_chars_as_assistant,
-        )
-
-        try:
-            output, info = self._model.generate(
-                split_prompt, max_tokens=self._config.max_internal_tokens
-            )
-            split = self._extract_answer(output[0][0])
-            self._local_usage += info.usage
-            self.usage += info.usage
-        except Exception as e:
-            self._logger.error(
-                {
-                    f"[RecursivePrompting.generate:split] The problem with UID '{problem.uid}' could not be split": None,
-                    "Error source": "model",
-                    "Error message": str(e),
-                }
-            )
-            split = ""
-        if split is None:
-            self._logger.error(
-                f"[RecursivePrompting.generate] The problem with UID '{problem.uid}' was not split."
-            )
-            split = ""
-
-        subproblems_ids = self._parse_subproblems(split)
-
-        problem.dependencies.extend(subproblems_ids)
-
-        return subproblems_ids
-
-    def _get_instructions(
-        self, problem: _Problem, shots: list[tuple[str, str]] = []
-    ) -> str:
-        """
-        Generate instructions to merge sub-solutions.
-
-        ### Parameters
-        ----------
-        `problem`: the original problem.
-        `subproblems`: the sub-problems to be solved.
-
-        ### Returns
-        -------
-        Instructions to merge sub-solutions to solve the original problem.
-
-        ### Raises
-        -------
-        `RuntimeError`: if the method is configured to elicit instructions, but no instructions prompt is provided.
-
-        ### Notes
-        ----------
-        - The method will not generate instructions if `Config.elicit_instructions` is `False`.
-        """
-
-        shots_str = construct_shots_str(shots)
-        deps_str = self._construct_dependencies_str(problem.dependencies)
-
-        if self._instructions_prompt is None:
-            raise RuntimeError(
-                "[RecursivePrompting.generate:instructions] The method is configured to elicit instructions, but no instructions prompt is provided."
-            )
-
-        instructions_prompt = self._instructions_prompt.format(
-            problem=problem.description, subproblems=deps_str, shots=shots_str
-        ).strip()
-        instructions_prompt = add_roles_to_context(
-            instructions_prompt,
-            system_chars=self._config.instructions_first_chars_as_system,
-            assistant_chars=self._config.instructions_last_chars_as_assistant,
-        )
-
-        try:
-            output, info = self._model.generate(
-                instructions_prompt, max_tokens=self._config.max_internal_tokens
-            )
-            instructions = self._extract_answer(output[0][0])
-            self._local_usage += info.usage
-            self.usage += info.usage
-        except Exception as e:
-            self._logger.error(
-                {
-                    f"[RecursivePrompting.generate:instructions] The problem with UID '{problem.uid}' could not generate instructions": None,
-                    "Error source": "model",
-                    "Error message": str(e),
-                }
-            )
-            instructions = ""
-        if instructions is None:
-            self._logger.error(
-                f"[RecursivePrompting.generate] Instructions for the problem with UID '{problem.uid}' were not generated."
-            )
-            instructions = ""
-
-        problem.instructions = instructions
-
-        return instructions
-
     def _parse_subproblems(self, output: str) -> list[str]:
         """
         Parse the output of the model to find sub-problems.
@@ -883,6 +845,7 @@ class RecursivePrompting(Method):
 
             line = line.strip()
 
+            local_i = 1
             for prefix in self._subproblem_prefixes:
                 if line.lower().startswith(prefix):
                     if detected_prefix is not None and detected_prefix != prefix:
@@ -898,7 +861,8 @@ class RecursivePrompting(Method):
                     line = line[len(prefix) :].strip()
 
                     # Construct the problem
-                    p = self._parse_raw_subproblem(line)
+                    p = self._parse_raw_subproblem(line, local_i)
+                    local_i += 1
 
                     # Create global IDs; this is necessary because the IDs generated
                     # by the model are likely to repeat across independent splitting steps.
@@ -952,13 +916,14 @@ class RecursivePrompting(Method):
 
         return [p.uid for p in list(subproblems_dict.values())]
 
-    def _parse_raw_subproblem(self, raw_problem: str) -> _Problem:
+    def _parse_raw_subproblem(self, raw_problem: str, problem_idx: int) -> _Problem:
         """
         Parse a raw sub-problem string (given in a bullet point) to find the ID, description and dependencies between sub-problems.
 
         ### Parameters
         ----------
         `raw_problem`: the raw problem string.
+        `problem_idx`: the local index of the raw problem in the list of raw problems, which is used to generate the local ID if it is not provided by the model.
 
         ### Returns
         -------
@@ -977,7 +942,8 @@ class RecursivePrompting(Method):
         raw_problem = raw_problem.strip()
 
         if self._config.dependency_syntax == DependencySyntax.NONE:
-            uid = lid = self._id_gen.next()
+            uid = self._id_gen.next()
+            lid = str(problem_idx)
             desc = raw_problem
             deps_ids = []
 
@@ -996,7 +962,7 @@ class RecursivePrompting(Method):
                 self._logger.error(
                     "[RecursivePrompting.generate] The ID of the problem could not be found for dependency syntax 'BRACKETS_PARENS'."
                 )
-                lid = uid
+                lid = str(problem_idx)
 
             # Dependencies
             try:
