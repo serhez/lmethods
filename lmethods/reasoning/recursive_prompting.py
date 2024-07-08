@@ -875,14 +875,13 @@ class RecursivePrompting(Method):
             log_msg = f"[RecursivePrompting.parse_subproblems] The number of sub-problems ({len(subproblems_dict)}) exceeds the max. width ({self._config.max_width})."
             if self._config.enforce_max_width:
                 log_msg += " The problem will be solved directly."
-                self._logger.error(log_msg)
-                return []
-            else:
                 self._logger.warn(log_msg)
+                return []
+            self._logger.warn(log_msg)
 
         # Exceeding the maximum number of nodes
         elif len(subproblems_dict) + len(self._problems_cache) > self._config.max_nodes:
-            self._logger.error(
+            self._logger.warn(
                 f"[RecursivePrompting.[parse_subproblems]] Adding the proposed sub-problems ({len(subproblems_dict)}) "
                 f"to the existing amount of problems ({len(self._problems_cache)}) would exceed the max. "
                 f"num. of nodes ({self._config.max_nodes}). The problem will be solved directly."
