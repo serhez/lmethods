@@ -395,6 +395,7 @@ class RecursivePrompting(Method):
         self._problems_cache = {}
         self._id_gen.reset()
         self._local_usage = Usage()
+        self._current_root_id = None
 
     def _generate_impl(
         self,
@@ -560,7 +561,7 @@ class RecursivePrompting(Method):
 
         self._logger.debug(
             {
-                "[RecursivePrompting.generate:bfs]": None,
+                "[RecursivePrompting.generate:bfs:root]": None,
                 "Problem UID": problem.uid,
                 "Problem desc.": problem.description,
                 "Problem sol.": problem.solution,
