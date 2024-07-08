@@ -210,19 +210,10 @@ class RecursivePrompting(Method):
 
             self._uid = uid
             self._lid = lid
-
             self._dependencies = dependencies
-
-            self._description = description.strip()
-            self._description = f"{self._description}{'' if any(self._description.endswith(c) for c in END_CHARS) else '.'}"
-
-            self._instructions = instructions.strip()
-            self._instructions = f"{self._instructions}{'' if any(self._instructions.endswith(c) for c in END_CHARS) else '.'}"
-
-            self._solution = solution
-            if self._solution is not None:
-                self._solution = self._solution.strip()
-                self._solution = f"{self._solution}{'' if any(self._solution.endswith(c) for c in END_CHARS) else '.'}"
+            self.description = description
+            self.instructions = instructions
+            self.solution = solution
 
         @property
         def uid(self) -> str:
@@ -262,7 +253,8 @@ class RecursivePrompting(Method):
             """Set the description of the problem."""
 
             self._description = value.strip()
-            self._description = f"{self._description}{'' if any(self._description.endswith(c) for c in END_CHARS) else '.'}"
+            if self._description != "":
+                self._description = f"{self._description}{'' if any(self._description[-1] == c for c in END_CHARS) else '.'}"
 
         @property
         def dependencies(self) -> list[str]:
@@ -286,8 +278,10 @@ class RecursivePrompting(Method):
         def instructions(self, value: str):
             """Set the instructions to merge the sub-solutions."""
 
-            self._instructions = value.strip()
-            self._instructions = f"{self._instructions}{'' if any(self._instructions.endswith(c) for c in END_CHARS) else '.'}"
+            self._instructions = value
+            if self._instructions != "":
+                self._instructions = value.strip()
+                self._instructions = f"{self._instructions}{'' if any(self._instructions[-1] == c for c in END_CHARS) else '.'}"
 
         @property
         def solution(self) -> str | None:
@@ -300,9 +294,9 @@ class RecursivePrompting(Method):
             """Set the solution to the problem."""
 
             self._solution = value
-            if self._solution is not None:
+            if self._solution is not None and self._solution != "":
                 self._solution = self._solution.strip()
-                self._solution = f"{self._solution}{'' if any(self._solution.endswith(c) for c in END_CHARS) else '.'}"
+                self._solution = f"{self._solution}{'' if any(self._solution[-1] == c for c in END_CHARS) else '.'}"
 
         @property
         def is_solved(self) -> bool:
@@ -621,9 +615,11 @@ class RecursivePrompting(Method):
                 }
             )
             split = ""
+
+        # Insanity check...
         if split is None:
             self._logger.error(
-                f"[RecursivePrompting.generate] The problem with UID '{problem.uid}' was not split."
+                f"[RecursivePrompting.generate:split] The problem with UID '{problem.uid}' was not split."
             )
             split = ""
 
