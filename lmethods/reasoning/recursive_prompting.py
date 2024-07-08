@@ -543,14 +543,9 @@ class RecursivePrompting(Method):
 
             if not dep.is_solved:
                 self._split_or_solve(dep, 0, shots)
-            else:
-                raise RuntimeError(
-                    "[RecursivePrompting.generate:bfs] The dependencies of the sub-problems contain a cycle."
-                )
-
-            for subdep_id in dep.dependencies:
-                if not self._problems_cache[subdep_id].is_solved:
-                    unsolved.put(subdep_id)
+                for subdep_id in dep.dependencies:
+                    if not self._problems_cache[subdep_id].is_solved:
+                        unsolved.put(subdep_id)
 
         # Merge all problems in the graph recursively
         self._solve_dfs(problem, 1, shots, only_merge=True)
@@ -633,7 +628,6 @@ class RecursivePrompting(Method):
             split = ""
 
         subproblems_ids = self._parse_subproblems(split)
-
         problem.dependencies.extend(subproblems_ids)
 
         # If it is a unit problem, solve it
