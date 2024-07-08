@@ -332,6 +332,7 @@ class RecursivePrompting(Method):
 
         self._problems_cache: dict[str, RecursivePrompting._Problem] = {}
         self._id_gen = IDGenerator()
+        self._current_root_id: str | None = None
 
         self._unit_prompt = read_prompt(config.unit_prompt_path)
         self._split_prompt = read_prompt(config.split_prompt_path)
@@ -382,8 +383,10 @@ class RecursivePrompting(Method):
         shots: ShotsCollection = ShotsCollection(),
         max_tokens: int = 500,
     ) -> tuple[str, Method.GenerationInfo]:
-        root_id = self._id_gen.next()
-        problem = RecursivePrompting._Problem(root_id, root_id, context)
+        self._current_root_id = self._id_gen.next()
+        problem = RecursivePrompting._Problem(
+            self._current_root_id, self._current_root_id, context
+        )
         self._add_to_cache(problem)
 
         if self._config.search_strategy == SearchStrategy.BFS:
@@ -405,23 +408,12 @@ class RecursivePrompting(Method):
             )
 
         # Save the graph
-        if self._config.graph_file_path is not None:
-            graph_dict = self._generate_graph(root_id)
-
-            try:
-                with open(self._config.graph_file_path, "r") as file:
-                    graphs = json.load(file)
-            except (FileNotFoundError, json.JSONDecodeError):
-                graphs = []
-            graphs.append(graph_dict)
-
-            with open(self._config.graph_file_path, "w") as file:
-                json.dump(graphs, file, indent=4)
+        self._save_graph(self._current_root_id)
 
         self._logger.debug(
             {
                 "[RecursivePrompting.generate]": None,
-                "Root ID": root_id,
+                "Root ID": self._current_root_id,
                 "Context": context,
                 "Max. tokens": max_tokens,
                 "Output": output,
@@ -458,9 +450,19 @@ class RecursivePrompting(Method):
         - If `True`, the method will not attempt to split the problem into sub-problems.
         """
 
-        mode = "merge" if only_merge else "dfs"
+        mode = "bfs" if only_merge else "dfs"
 
         if problem.uid in visited:
+            self._logger.error(
+                {
+                    f"[RecursivePrompting.generate:{mode}] A cycle has been detected.": None,
+                    "Depth": depth,
+                    "Problem UID": problem.uid,
+                    "Visited nodes": visited,
+                }
+            )
+            if self._current_root_id:
+                self._save_graph(self._current_root_id)
             raise RuntimeError(
                 f"[RecursivePrompting.generate:{mode}] The dependencies of the sub-problems contain a cycle."
             )
@@ -496,6 +498,7 @@ class RecursivePrompting(Method):
                 "Problem UID": problem.uid,
                 "Problem desc.": problem.description,
                 "Problem sol.": problem.solution,
+                "Sub-problems IDs": problem.dependencies,
                 "Sub-problems desc.": [
                     self._problems_cache[id].description for id in problem.dependencies
                 ],
@@ -541,15 +544,16 @@ class RecursivePrompting(Method):
                     if not self._problems_cache[subdep_id].is_solved:
                         unsolved.put(subdep_id)
 
-        # Merge all problems in the graph recursively
+        # Merge all problems in the graph reusing the DFS recursive logic
         self._solve_dfs(problem, 1, shots, only_merge=True)
 
         self._logger.debug(
             {
-                "[RecursivePrompting.generate:complex]": None,
+                "[RecursivePrompting.generate:bfs]": None,
                 "Problem UID": problem.uid,
                 "Problem desc.": problem.description,
                 "Problem sol.": problem.solution,
+                "Sub-problems IDs": problem.dependencies,
                 "Sub-problems desc.": [
                     self._problems_cache[id].description for id in problem.dependencies
                 ],
@@ -939,7 +943,7 @@ class RecursivePrompting(Method):
             desc = raw_problem
 
             # ID
-            uid = self._id_gen.random()
+            uid = self._id_gen.next()
             try:
                 if not desc.startswith("["):
                     raise ValueError
@@ -989,11 +993,9 @@ class RecursivePrompting(Method):
             ]
         )[:-1]
 
-    def _generate_graph(
-        self, root_id: str
-    ) -> dict[str, str | dict[str, dict[str, str]]]:
+    def _save_graph(self, root_id: str) -> bool:
         """
-        Generate a graph of the problem-solving process.
+        Generate and save a graph of the problem-solving process.
 
         ### Parameters
         ----------
@@ -1001,8 +1003,15 @@ class RecursivePrompting(Method):
 
         ### Returns
         -------
-        A dictionary representing the graph.
+        Whether the graph was saved successfully.
+
+        ### Notes
+        ----------
+        - The graph will only be saved if `Config.graph_file_path` is not `None`.
         """
+
+        if self._config.graph_file_path is None:
+            return False
 
         nodes = {}
         for id, problem in self._problems_cache.items():
@@ -1012,7 +1021,32 @@ class RecursivePrompting(Method):
                 "solution": problem.solution,
             }
 
-        return {"root_id": root_id, "nodes": nodes}
+        graph_dict = {"root_id": root_id, "nodes": nodes}
+
+        try:
+            with open(self._config.graph_file_path, "r") as file:
+                graphs = json.load(file)
+        except (FileNotFoundError, json.JSONDecodeError):
+            self._logger.warn(
+                f"[RecursivePrompting.save_graph] The graph file '{self._config.graph_file_path}' could not be read. The contents will be overwritten."
+            )
+            graphs = []
+        graphs.append(graph_dict)
+
+        try:
+            with open(self._config.graph_file_path, "w") as file:
+                json.dump(graphs, file, indent=4)
+        except Exception as e:
+            self._logger.error(
+                {
+                    "[RecursivePrompting.save_graph] The graph could not be written to the file": None,
+                    "Error source": "file",
+                    "Error message": str(e),
+                }
+            )
+            return False
+
+        return True
 
     def train(self, _):
         raise NotImplementedError("RecursivePrompting does not support training.")

@@ -50,24 +50,26 @@ class classproperty(property):
 
 
 class IDGenerator:
-    def __init__(self, max_retries: int = 10):
+    def __init__(self, start: int = 1000, max_retries: int = 10):
         """
         Initializes the ID generator.
 
         ### Parameters
         ----------
         `max_retries`: the maximum number of attempts to generate a unique random ID.
+        `start`: the starting ID for the generator. Defaults to `1000
         """
 
         self._max_retries = max_retries
         self._cache: list[int] = []
-        self._current = 0
+        self._start = start
+        self._current = start
 
     def reset(self):
         """Resets the cache of the generated IDs."""
 
         self._cache = []
-        self._current = 0
+        self._current = self._start
 
     def next(self) -> str:
         """
