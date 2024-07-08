@@ -835,6 +835,7 @@ class RecursivePrompting(Method):
         subproblems_dict: dict[str, RecursivePrompting._Problem] = {}
 
         detected_prefix = None
+        local_i = 1
 
         for line in output.split("\n"):
             if any(line.startswith(char) for char in ["  ", "\t"]):
@@ -845,7 +846,6 @@ class RecursivePrompting(Method):
 
             line = line.strip()
 
-            local_i = 1
             for prefix in self._subproblem_prefixes:
                 if line.lower().startswith(prefix):
                     if detected_prefix is not None and detected_prefix != prefix:
@@ -872,7 +872,6 @@ class RecursivePrompting(Method):
                             f"[RecursivePrompting.parse_subproblems] The local ID '{p.lid}' is repeated in the output. Incoming dependencies will be ignored."
                         )
                         p.lid = p.uid
-
                     subproblems_dict[p.lid] = p
 
                     break
