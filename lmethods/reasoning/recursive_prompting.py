@@ -487,6 +487,7 @@ class RecursivePrompting(Method):
         visited.add(problem.uid)
 
         if not only_merge:
+            self._logger.debug(f"Splitting problem {problem.uid} via DFS")
             self._split(problem, shots)
 
         # Solve each sub-problem recursively (if any)
@@ -501,6 +502,9 @@ class RecursivePrompting(Method):
             self._set_instructions(problem, shots.instructions)
 
         # Merge the sub-solutions
+        self._logger.debug(
+            f"Solving problem {problem.uid} with dependencies {problem.dependencies}"
+        )
         self._solve_directly(problem, shots)
 
         self._logger.debug(
@@ -538,6 +542,7 @@ class RecursivePrompting(Method):
         - If empty at any stage, the method will not use in-context learning (i.e., zero-shot).
         """
 
+        self._logger.debug(f"Splitting problem {problem.uid} via BFS")
         self._split(problem, shots)
 
         unsolved = Queue()
@@ -551,6 +556,7 @@ class RecursivePrompting(Method):
             dep = self._problems_cache[dep_id]
 
             if not dep.is_solved:
+                self._logger.debug(f"Splitting problem {dep.uid} via BFS")
                 self._split(dep, shots)
                 for subdep_id in dep.dependencies:
                     if not self._problems_cache[subdep_id].is_solved:
@@ -638,6 +644,9 @@ class RecursivePrompting(Method):
             split = ""
 
         subproblems_ids = self._parse_subproblems(split, problem.uid)
+        self._logger.debug(
+            f"Extending the dependencies of problem {problem.uid}: {problem.dependencies} + {subproblems_ids}"
+        )
         problem.dependencies.extend(subproblems_ids)
 
     def _set_instructions(self, problem: _Problem, shots: list[tuple[str, str]] = []):
@@ -901,7 +910,10 @@ class RecursivePrompting(Method):
                         "of the problem with local ID '{p_local_id}' does not exist. "
                         "It may have been removed if the maximum num. of nodes was exceeded. Ignoring the dependency."
                     )
-            p.dependencies = global_deps
+            self._logger.debug(
+                f"Extending same-depth dependencies of problem {p.uid}: {p.dependencies} + {global_deps}"
+            )
+            p.dependencies.extend(global_deps)
 
         # Add the sub-problems to the cache
         for p in subproblems_dict.values():
