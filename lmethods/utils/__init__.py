@@ -1,6 +1,6 @@
 import numpy as np
 
-from .decomposition import DependencySyntax
+from .decomposition import DependencySyntax, SearchStrategy
 from .graphs import DAG, DirectedGraph, Edge, Node
 from .logging import NullLogger
 from .prompting import (
@@ -23,6 +23,7 @@ __all__ = [
     "Edge",
     "Node",
     "DirectedGraph",
+    "SearchStrategy",
     "DAG",
     "IDGenerator",
     "DependencySyntax",

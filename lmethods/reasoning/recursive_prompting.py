@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
+from queue import Queue
 
 import n2w
 
@@ -13,6 +14,7 @@ from lmethods.utils import (
     BaseShotsCollection,
     DependencySyntax,
     IDGenerator,
+    SearchStrategy,
     Usage,
     add_roles_to_context,
     classproperty,
@@ -73,6 +75,9 @@ class RecursivePrompting(Method):
         The syntax used to represent dependencies between sub-problems.
         This is irrelevant if dependencies are not elicited via the split prompt.
         """
+
+        search_strategy: SearchStrategy = SearchStrategy.BFS
+        """The strategy used to traverse the decomposition graph."""
 
         unit_prompt_path: str
         """The path to the meta-prompt used to solve unit problems."""
@@ -178,7 +183,8 @@ class RecursivePrompting(Method):
             uid: str,
             lid: str,
             description: str,
-            dependencies: list[str] | None = None,
+            dependencies: list[str] = [],
+            instructions: str = "",
             solution: str | None = None,
         ):
             """
@@ -191,25 +197,27 @@ class RecursivePrompting(Method):
             - This ID may not be unique within the whole graph.
             `description`: the description of the problem.
             `dependencies`: the IDs of the problems that this problem depends on.
+            `instructions`: the instructions to merge the sub-solutions.
             `solution`: the solution to the problem.
 
             ### Notes
             ----------
             - The description and solution will be stripped of surrounding whitespace.
             - The description will be punctuated if it is not already.
+            - The instructions will be punctuated if they are not already.
             - The solution will be punctuated if it is not already.
             """
 
             self._uid = uid
             self._lid = lid
 
-            if dependencies is None:
-                self._dependencies = []
-            else:
-                self._dependencies = dependencies
+            self._dependencies = dependencies
 
             self._description = description.strip()
             self._description = f"{self._description}{'' if any(self._description.endswith(c) for c in END_CHARS) else '.'}"
+
+            self._instructions = instructions.strip()
+            self._instructions = f"{self._instructions}{'' if any(self._instructions.endswith(c) for c in END_CHARS) else '.'}"
 
             self._solution = solution
             if self._solution is not None:
@@ -267,6 +275,19 @@ class RecursivePrompting(Method):
             """Set the IDs of the problems that this problem depends on."""
 
             self._dependencies = value
+
+        @property
+        def instructions(self) -> str:
+            """The instructions to merge the sub-solutions."""
+
+            return self._instructions
+
+        @instructions.setter
+        def instructions(self, value: str):
+            """Set the instructions to merge the sub-solutions."""
+
+            self._instructions = value.strip()
+            self._instructions = f"{self._instructions}{'' if any(self._instructions.endswith(c) for c in END_CHARS) else '.'}"
 
         @property
         def solution(self) -> str | None:
@@ -371,7 +392,14 @@ class RecursivePrompting(Method):
         problem = RecursivePrompting._Problem(root_id, root_id, context)
         self._add_to_cache(problem)
 
-        self._solve(problem, 1, shots)
+        if self._config.search_strategy == SearchStrategy.BFS:
+            self._solve_bfs(problem, shots)
+        elif self._config.search_strategy == SearchStrategy.DFS:
+            self._solve_dfs(problem, 1, shots)
+        else:
+            raise ValueError(
+                f"[RecursivePrompting.generate] The search strategy '{self._config.search_strategy}' is not supported."
+            )
         assert problem.is_solved, "The problem was not solved."
 
         output = problem.solution[:max_tokens]  # type: ignore[reportOptionalSubscript]
@@ -413,18 +441,25 @@ class RecursivePrompting(Method):
 
         return output, Method.GenerationInfo(usage=self._local_usage)
 
-    def _solve(
-        self, problem: _Problem, depth: int, shots: ShotsCollection = ShotsCollection()
-    ):
+    def _split_or_solve(
+        self,
+        problem: _Problem,
+        depth: int,
+        shots: ShotsCollection = ShotsCollection(),
+    ) -> tuple[list[str], str]:
         """
-        Solves a problem using recursive prompting and stores the solution in the problem object.
+        Split a problem into sub-problems or solve it directly.
 
         ### Parameters
         ----------
-        `problem`: the problem to be solved.
+        `problem`: the problem to be split or solved.
         `depth`: the current depth of the recursion.
         `shots`: a shots collection to use for in-context learning.
         - If empty at any stage, the method will not use in-context learning (i.e., zero-shot).
+
+        ### Returns
+        -------
+        A tuple with the IDs of the sub-problems to be solved and the instructions to merge the sub-solutions.
         """
 
         # If the max. depth or the max. num. of nodes are reached, solve the problem directly
@@ -432,99 +467,16 @@ class RecursivePrompting(Method):
             depth >= self._config.max_depth
             or len(self._problems_cache) >= self._config.max_nodes
         ):
-            try:
-                output, info = self._model.generate(
-                    self._construct_unit_context(problem, shots),
-                    max_tokens=self._config.max_internal_tokens,
-                )
-                if output[0][0] is None:
-                    self._logger.error(
-                        f"[RecursivePrompting.generate:max_depth] The problem with UID '{problem.uid}' was not solved."
-                    )
-                    problem.solution = ""
-                else:
-                    problem.solution = self._extract_answer(output[0][0])
-                self._local_usage += info.usage
-                self.usage += info.usage
-            except Exception as e:
-                self._logger.error(
-                    {
-                        f"[RecursivePrompting.generate:max_depth] The problem with UID '{problem.uid}' could not be solved": None,
-                        "Error source": "model",
-                        "Error message": str(e),
-                    }
-                )
-                output = [[""]]
-                problem.solution = ""
-
-            if not problem.is_solved:
-                self._logger.error(
-                    f"[RecursivePrompting.generate:max_budget] The problem with UID '{problem.uid}' was not solved."
-                )
-                problem.solution = ""
-
-            self._logger.debug(
-                {
-                    "[RecursivePrompting.generate:max_budget]": None,
-                    "Depth": depth,
-                    "N. of nodes": len(self._problems_cache),
-                    "Model output": output[0][0],
-                    "Problem UID": problem.uid,
-                    "Problem desc.": problem.description,
-                    "Problem sol.": problem.solution,
-                }
-            )
-
-            return
+            self._solve_directly(problem, shots, depth)
+            return [], ""
 
         # Split the problem into sub-problems
         subproblems_ids = self._split(problem, shots.split)
 
         # If it is a unit problem, solve it
         if len(subproblems_ids) == 0:
-            try:
-                output, info = self._model.generate(
-                    self._construct_unit_context(problem, shots),
-                    max_tokens=self._config.max_internal_tokens,
-                )
-                if output[0][0] is None:
-                    self._logger.error(
-                        f"[RecursivePrompting.generate:unit] The problem with UID '{problem.uid}' was not solved."
-                    )
-                    problem.solution = ""
-                else:
-                    problem.solution = self._extract_answer(output[0][0])
-                self._local_usage += info.usage
-                self.usage += info.usage
-            except Exception as e:
-                self._logger.error(
-                    {
-                        f"[RecursivePrompting.generate:unit] The problem with UID '{problem.uid}' could not be solved": None,
-                        "Error source": "model",
-                        "Error message": str(e),
-                    }
-                )
-                output = [[""]]
-                problem.solution = ""
-
-            if not problem.is_solved:
-                self._logger.error(
-                    f"[RecursivePrompting.generate:unit] The problem with UID '{problem.uid}' was not solved."
-                )
-                problem.solution = ""
-
-            self._logger.debug(
-                {
-                    "[RecursivePrompting.generate:unit]": None,
-                    "Depth": depth,
-                    "Model output": output[0][0],
-                    "Problem UID": problem.uid,
-                    "Problem desc.": problem.description,
-                    "Problem sol.": problem.solution,
-                }
-            )
-
-            return
+            self._solve_directly(problem, shots, depth)
+            return [], ""
 
         # Obtain merging instructions
         if self._config.elicit_instructions:
@@ -532,7 +484,38 @@ class RecursivePrompting(Method):
         else:
             instructions = ""
 
-        # Solve each sub-problem
+        return subproblems_ids, instructions
+
+    def _solve_dfs(
+        self,
+        problem: _Problem,
+        depth: int,
+        shots: ShotsCollection = ShotsCollection(),
+        only_merge: bool = False,
+    ):
+        """
+        Solves a problem using recursive prompting via the DFS strategy and stores the solution in the problem object.
+
+        ### Parameters
+        ----------
+        `problem`: the problem to be solved.
+        `depth`: the current depth of the recursion.
+        `subproblems_ids`: the IDs of the sub-problems to be solved.
+        `instructions`: the instructions to merge the sub-solutions.
+        `shots`: a shots collection to use for in-context learning.
+        - If empty at any stage, the method will not use in-context learning (i.e., zero-shot).
+        `only_merge`: whether to only merge the sub-solutions to solve the original problem.
+        - If `True`, the method will not attempt to split the problem into sub-problems.
+
+        ### Notes
+        ----------
+        - This method can be used to only merge (no splitting attempted) all problems in the graph starting from the leaves if `only_merge` is `True`.
+        """
+
+        if not only_merge:
+            subproblems_ids, instructions = self._split_or_solve(problem, depth, shots)
+
+        # Solve each sub-problem recursively
         while any(
             [
                 not self._problems_cache[dep_id].is_solved
@@ -556,10 +539,10 @@ class RecursivePrompting(Method):
             for dep_id in to_solve:
                 # TODO: we can solve sub-problems in parallel here
                 dep = self._problems_cache[dep_id]
-                self._solve(dep, depth + 1, shots)
+                self._solve_dfs(dep, depth + 1, shots)
 
-        # Combine solutions to sub-problems to solve the original problem
-        problem.solution = self._merge(problem, instructions, shots.merge)
+        # Merge the sub-solutions
+        self._solve_directly(problem, shots, depth)
 
         self._logger.debug(
             {
@@ -575,6 +558,129 @@ class RecursivePrompting(Method):
                     self._problems_cache[id].solution for id in subproblems_ids
                 ],
                 "Instructions": instructions,
+            }
+        )
+
+    def _solve_bfs(
+        self,
+        problem: _Problem,
+        shots: ShotsCollection = ShotsCollection(),
+    ):
+        """
+        Solves a problem using recursive prompting via the BFS strategy and stores the solution in the problem object.
+
+        ### Parameters
+        ----------
+        `problem`: the problem to be solved.
+        `subproblems_ids`: the IDs of the sub-problems to be solved.
+        `instructions`: the instructions to merge the sub-solutions.
+        `shots`: a shots collection to use for in-context learning.
+        - If empty at any stage, the method will not use in-context learning (i.e., zero-shot).
+        """
+
+        subproblems_ids, instructions = self._split_or_solve(problem, 0, shots)
+
+        unsolved = Queue()
+        for dep_id in subproblems_ids:
+            unsolved.put(dep_id)
+
+        # Split (or solve directly if necessary) the sub-problems using BFS
+        # TODO: parallelize this
+        while not unsolved.empty():
+            dep_id = unsolved.get()
+            dep = self._problems_cache[dep_id]
+
+            if not dep.is_solved:
+                self._split_or_solve(dep, 0, shots)
+            else:
+                raise RuntimeError(
+                    "[RecursivePrompting.generate] The dependencies of the sub-problems contain a cycle."
+                )
+
+            for subdep_id in dep.dependencies:
+                if not self._problems_cache[subdep_id].is_solved:
+                    unsolved.put(subdep_id)
+
+        # Merge all problems in the graph starting from the leaves
+        self._solve_dfs(problem, 1, shots, only_merge=True)
+
+        self._logger.debug(
+            {
+                "[RecursivePrompting.generate:complex]": None,
+                "Problem UID": problem.uid,
+                "Problem desc.": problem.description,
+                "Problem sol.": problem.solution,
+                "Sub-problems desc.": [
+                    self._problems_cache[id].description for id in subproblems_ids
+                ],
+                "Sub-problems sol.": [
+                    self._problems_cache[id].solution for id in subproblems_ids
+                ],
+                "Instructions": instructions,
+            }
+        )
+
+    def _solve_directly(self, problem: _Problem, shots: ShotsCollection, depth: int):
+        """
+        Solve a problem directly, either as a unit problem (no dependencies) or by merging (dependencies).
+
+        ### Parameters
+        ----------
+        `problem`: the problem to be solved.
+        `shots`: a list of (input, target) pairs to use for in-context learning.
+        `depth`: the current depth of the recursion.
+        """
+
+        if depth >= self._config.max_depth:
+            case = "max_depth"
+        elif len(self._problems_cache) >= self._config.max_nodes:
+            case = "max_budget"
+        elif len(problem.dependencies) == 0:
+            case = "unit"
+        else:
+            case = "merge"
+
+        try:
+            output, info = self._model.generate(
+                self._construct_unit_context(problem, shots),
+                max_tokens=self._config.max_internal_tokens,
+            )
+            if output[0][0] is None:
+                self._logger.error(
+                    f"[RecursivePrompting.generate:{case}] The problem with UID '{problem.uid}' was not solved."
+                )
+                problem.solution = ""
+            else:
+                problem.solution = self._extract_answer(output[0][0])
+            self._local_usage += info.usage
+            self.usage += info.usage
+        except Exception as e:
+            self._logger.error(
+                {
+                    f"[RecursivePrompting.generate:{case}] The problem with UID '{problem.uid}' could not be solved": None,
+                    "Error source": "model",
+                    "Error message": str(e),
+                }
+            )
+            output = [[""]]
+            problem.solution = ""
+
+        # Insanity check to avoid infinite loops
+        if not problem.is_solved:
+            self._logger.error(
+                f"[RecursivePrompting.generate:{case}] The problem with UID '{problem.uid}' was not solved."
+            )
+            problem.solution = ""
+
+        self._logger.debug(
+            {
+                f"[RecursivePrompting.generate:{case}]": None,
+                "Depth": depth,
+                "N. of nodes": len(self._problems_cache),
+                "Model output": output[0][0],
+                "Problem UID": problem.uid,
+                "Problem desc.": problem.description,
+                "Problem sol.": problem.solution,
             }
         )
 
@@ -605,7 +711,7 @@ class RecursivePrompting(Method):
             context = self._merge_prompt.format(
                 problem=problem.description,
                 subsolutions=self._construct_dependencies_str(problem.dependencies),
-                instructions="",
+                instructions=problem.instructions,
                 shots=construct_shots_str(shots_collection.merge),
             ).strip()
             context = add_roles_to_context(
@@ -744,67 +850,9 @@ class RecursivePrompting(Method):
             )
             instructions = ""
 
+        problem.instructions = instructions
+
         return instructions
-
-    def _merge(
-        self,
-        problem: _Problem,
-        instructions: str,
-        shots: list[tuple[str, str]] = [],
-    ) -> str:
-        """
-        Merge sub-solutions to solve the original problem.
-
-        ### Parameters
-        ----------
-        `problem`: the original problem.
-        `instructions`: the instructions to merge the sub-solutions.
-        `shots`: a list of (input, target) pairs to use for in-context learning.
-
-        ### Returns
-        -------
-        The solution to the original problem.
-        """
-
-        shots_str = construct_shots_str(shots)
-
-        merge_prompt = self._merge_prompt.format(
-            problem=problem.description,
-            subsolutions=self._construct_dependencies_str(problem.dependencies),
-            instructions=instructions,
-            shots=shots_str,
-        ).strip()
-        merge_prompt = add_roles_to_context(
-            merge_prompt,
-            system_chars=self._config.merge_first_chars_as_system,
-            assistant_chars=self._config.merge_last_chars_as_assistant,
-        )
-
-        try:
-            output, info = self._model.generate(
-                merge_prompt, max_tokens=self._config.max_internal_tokens
-            )
-            merge = self._extract_answer(output[0][0])
-            self._local_usage += info.usage
-            self.usage += info.usage
-        except Exception as e:
-            self._logger.error(
-                {
-                    f"[RecursivePrompting.generate:merge] The problem with UID '{problem.uid}' could not be merged": None,
-                    "Error source": "model",
-                    "Error message": str(e),
-                }
-            )
-            merge = ""
-
-        # Insanity check to avoid infinite loops
-        if merge is None:
-            self._logger.error(
-                f"[RecursivePrompting.generate] The problem with UID '{problem.uid}' was not merged."
-            )
-            merge = ""
-
-        return merge
 
     def _parse_subproblems(self, output: str) -> list[str]:
         """
