@@ -183,6 +183,8 @@ class RecursivePrompting(Method):
             uid: str,
             lid: str,
             description: str,
+            parent: str | None = None,
+            depth: int = 1,
             dependencies: list[str] = [],
             instructions: str = "",
             solution: str | None = None,
@@ -196,6 +198,9 @@ class RecursivePrompting(Method):
             `lid`: the local ID of the problem in the context of its parents and children in the decomposition graph.
             - This ID may not be unique within the whole graph.
             `description`: the description of the problem.
+            `parent`: the UID of the parent problem in the decomposition graph.
+            - If `None`, the problem is the root of the graph.
+            `depth`: the minimum distance from the root of the graph to this node.
             `dependencies`: the IDs of the problems that this problem depends on.
             `instructions`: the instructions to merge the sub-solutions.
             `solution`: the solution to the problem.
@@ -211,6 +216,8 @@ class RecursivePrompting(Method):
             self._uid = uid
             self._lid = lid
             self._dependencies = dependencies
+            self._parent = parent
+            self._depth = depth
             self.description = description
             self.instructions = instructions
             self.solution = solution
@@ -255,6 +262,18 @@ class RecursivePrompting(Method):
             self._description = value.strip()
             if self._description != "":
                 self._description = f"{self._description}{'' if any(self._description[-1] == c for c in END_CHARS) else '.'}"
+
+        @property
+        def parent(self) -> str | None:
+            """The UID of the parent problem in the decomposition graph."""
+
+            return self._parent
+
+        @property
+        def depth(self) -> int:
+            """The minimum distance from the root of the graph to this node."""
+
+            return self._depth
 
         @property
         def dependencies(self) -> list[str]:
@@ -392,7 +411,7 @@ class RecursivePrompting(Method):
         if self._config.search_strategy == SearchStrategy.BFS:
             self._solve_bfs(problem, shots)
         elif self._config.search_strategy == SearchStrategy.DFS:
-            self._solve_dfs(problem, 1, shots)
+            self._solve_dfs(problem, shots)
         else:
             raise ValueError(
                 f"[RecursivePrompting.generate] The search strategy '{self._config.search_strategy}' is not supported."
@@ -430,7 +449,6 @@ class RecursivePrompting(Method):
     def _solve_dfs(
         self,
         problem: _Problem,
-        depth: int,
         shots: ShotsCollection = ShotsCollection(),
         visited: set[str] = set(),
         only_merge: bool = False,
@@ -442,7 +460,6 @@ class RecursivePrompting(Method):
         ### Parameters
         ----------
         `problem`: the problem to be solved.
-        `depth`: the current depth of the recursion.
         `shots`: a shots collection to use for in-context learning.
         - If empty at any stage, the method will not use in-context learning (i.e., zero-shot).
         `visited`: the set of IDs of the problems that have already been visited via DFS.
@@ -456,7 +473,7 @@ class RecursivePrompting(Method):
             self._logger.error(
                 {
                     f"[RecursivePrompting.generate:{mode}] A cycle has been detected.": None,
-                    "Depth": depth,
+                    "Depth": problem.depth,
                     "Problem UID": problem.uid,
                     "Visited nodes": visited,
                 }
@@ -469,32 +486,26 @@ class RecursivePrompting(Method):
         visited.add(problem.uid)
 
         if not only_merge:
-            self._split_or_solve(problem, depth, shots)
+            self._split(problem, shots)
 
         # Solve each sub-problem recursively (if any)
-        while any(
-            [
-                not self._problems_cache[dep_id].is_solved
-                for dep_id in problem.dependencies
-            ]
-        ):
-            # TODO: we can solve sub-problems in parallel here
-            for dep_id in [
-                id
-                for id in problem.dependencies
-                if not self._problems_cache[id].is_solved
-            ]:
-                self._solve_dfs(
-                    self._problems_cache[dep_id], depth + 1, shots, visited, only_merge
-                )
+        # TODO: we can solve sub-problems in parallel here
+        for dep_id in [
+            id for id in problem.dependencies if not self._problems_cache[id].is_solved
+        ]:
+            self._solve_dfs(self._problems_cache[dep_id], shots, visited, only_merge)
+
+        # Obtain merging instructions
+        if self._config.elicit_instructions:
+            self._set_instructions(problem, shots.instructions)
 
         # Merge the sub-solutions
-        self._solve_directly(problem, shots, depth)
+        self._solve_directly(problem, shots)
 
         self._logger.debug(
             {
                 f"[RecursivePrompting.generate:{mode}]": None,
-                "Depth": depth,
+                "Depth": problem.depth,
                 "Problem UID": problem.uid,
                 "Problem desc.": problem.description,
                 "Problem sol.": problem.solution,
@@ -526,7 +537,7 @@ class RecursivePrompting(Method):
         - If empty at any stage, the method will not use in-context learning (i.e., zero-shot).
         """
 
-        self._split_or_solve(problem, 0, shots)
+        self._split(problem, shots)
 
         unsolved = Queue()
         for dep_id in problem.dependencies:
@@ -539,13 +550,13 @@ class RecursivePrompting(Method):
             dep = self._problems_cache[dep_id]
 
             if not dep.is_solved:
-                self._split_or_solve(dep, 0, shots)
+                self._split(dep, shots)
                 for subdep_id in dep.dependencies:
                     if not self._problems_cache[subdep_id].is_solved:
                         unsolved.put(subdep_id)
 
         # Merge all problems in the graph reusing the DFS recursive logic
-        self._solve_dfs(problem, 1, shots, only_merge=True)
+        self._solve_dfs(problem, shots, only_merge=True)
 
         self._logger.debug(
             {
@@ -564,29 +575,27 @@ class RecursivePrompting(Method):
             }
         )
 
-    def _split_or_solve(
+    def _split(
         self,
         problem: _Problem,
-        depth: int,
         shots: ShotsCollection = ShotsCollection(),
     ):
         """
-        Split a problem into sub-problems or solve it directly.
+        Split a problem into sub-problems.
 
         ### Parameters
         ----------
         `problem`: the problem to be split or solved.
-        `depth`: the current depth of the recursion.
         `shots`: a shots collection to use for in-context learning.
         - If empty at any stage, the method will not use in-context learning (i.e., zero-shot).
         """
 
         # If the max. depth or the max. num. of nodes are reached, solve the problem directly
         if (
-            depth >= self._config.max_depth
+            problem.depth >= self._config.max_depth
             or len(self._problems_cache) >= self._config.max_nodes
         ):
-            self._solve_directly(problem, shots, depth)
+            self._solve_directly(problem, shots)
             return
 
         # Split the problem into sub-problems
@@ -627,17 +636,8 @@ class RecursivePrompting(Method):
             )
             split = ""
 
-        subproblems_ids = self._parse_subproblems(split)
+        subproblems_ids = self._parse_subproblems(split, problem.uid)
         problem.dependencies.extend(subproblems_ids)
-
-        # If it is a unit problem, solve it
-        if len(subproblems_ids) == 0:
-            self._solve_directly(problem, shots, depth)
-            return
-
-        # Obtain merging instructions
-        if self._config.elicit_instructions:
-            self._set_instructions(problem, shots.instructions)
 
     def _set_instructions(self, problem: _Problem, shots: list[tuple[str, str]] = []):
         """
@@ -698,7 +698,7 @@ class RecursivePrompting(Method):
 
         problem.instructions = instructions
 
-    def _solve_directly(self, problem: _Problem, shots: ShotsCollection, depth: int):
+    def _solve_directly(self, problem: _Problem, shots: ShotsCollection):
         """
         Solve a problem directly, either as a unit problem (no dependencies) or by merging (dependencies).
 
@@ -706,10 +706,9 @@ class RecursivePrompting(Method):
         ----------
         `problem`: the problem to be solved.
         `shots`: a list of (input, target) pairs to use for in-context learning.
-        `depth`: the current depth of the recursion.
         """
 
-        if depth >= self._config.max_depth:
+        if problem.depth >= self._config.max_depth:
             case = "max_depth"
         elif len(self._problems_cache) >= self._config.max_nodes:
             case = "max_budget"
@@ -753,7 +752,7 @@ class RecursivePrompting(Method):
         self._logger.debug(
             {
                 f"[RecursivePrompting.generate:{case}]": None,
-                "Depth": depth,
+                "Depth": problem.depth,
                 "N. of nodes": len(self._problems_cache),
                 "Model output": output[0][0],
                 "Problem UID": problem.uid,
@@ -810,13 +809,14 @@ class RecursivePrompting(Method):
 
         return context
 
-    def _parse_subproblems(self, output: str) -> list[str]:
+    def _parse_subproblems(self, output: str, parent_uid: str) -> list[str]:
         """
         Parse the output of the model to find sub-problems.
 
         ### Parameters
         ----------
         `output`: the output of the model.
+        `parent_uid`: the UID of the parent problem in the decomposition graph.
 
         ### Returns
         -------
@@ -855,7 +855,7 @@ class RecursivePrompting(Method):
                     line = line[len(prefix) :].strip()
 
                     # Construct the problem
-                    p = self._parse_raw_subproblem(line, local_i)
+                    p = self._parse_raw_subproblem(line, local_i, parent_uid)
                     local_i += 1
 
                     # Create global IDs; this is necessary because the IDs generated
@@ -908,7 +908,9 @@ class RecursivePrompting(Method):
 
         return [p.uid for p in list(subproblems_dict.values())]
 
-    def _parse_raw_subproblem(self, raw_problem: str, problem_idx: int) -> _Problem:
+    def _parse_raw_subproblem(
+        self, raw_problem: str, problem_idx: int, parent_uid: str
+    ) -> _Problem:
         """
         Parse a raw sub-problem string (given in a bullet point) to find the ID, description and dependencies between sub-problems.
 
@@ -916,6 +918,7 @@ class RecursivePrompting(Method):
         ----------
         `raw_problem`: the raw problem string.
         `problem_idx`: the local index of the raw problem in the list of raw problems, which is used to generate the local ID if it is not provided by the model.
+        `parent_uid`: the UID of the parent problem in the decomposition graph.
 
         ### Returns
         -------
@@ -979,7 +982,14 @@ class RecursivePrompting(Method):
                 "The specified dependency syntax is not implemented."
             )
 
-        return RecursivePrompting._Problem(uid, lid, desc, deps_ids)
+        return RecursivePrompting._Problem(
+            uid,
+            lid,
+            desc,
+            parent_uid,
+            self._problems_cache[parent_uid].depth + 1,
+            deps_ids,
+        )
 
     def _construct_dependencies_str(self, dependencies: list[str]) -> str:
         if len(dependencies) == 0:
