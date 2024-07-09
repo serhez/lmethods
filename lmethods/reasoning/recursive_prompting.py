@@ -392,6 +392,7 @@ class RecursivePrompting(Method):
             self._problems_cache[problem.uid] = problem
 
     def _reset_state(self):
+        self._logger.debug("[RecursivePrompting.reset_state] Resetting the state.")
         self._problems_cache = {}
         self._id_gen.reset()
         self._local_usage = Usage()
@@ -407,6 +408,24 @@ class RecursivePrompting(Method):
         problem = RecursivePrompting._Problem(
             self._current_root_id, self._current_root_id, context
         )
+
+        self._logger.debug(
+            {
+                "[RecursivePrompting.generate]": None,
+                "Context": context,
+                "Max. tokens": max_tokens,
+                "N. unit shots": len(shots.unit),
+                "N. split shots": len(shots.split),
+                "N. instructions shots": len(shots.instructions),
+                "N. merge shots": len(shots.merge),
+                "Root ID": self._current_root_id,
+                "Root obj.": problem,
+                "N. of nodes": len(self._problems_cache),
+                "Local usage": self._local_usage,
+                "Global usage": self.usage,
+            }
+        )
+
         self._add_to_cache(problem)
 
         if self._config.search_strategy == SearchStrategy.BFS:
@@ -437,10 +456,7 @@ class RecursivePrompting(Method):
                 "Context": context,
                 "Max. tokens": max_tokens,
                 "Output": output,
-                "N. unit shots": len(shots.unit),
-                "N. split shots": len(shots.split),
-                "N. instructions shots": len(shots.instructions),
-                "N. merge shots": len(shots.merge),
+                "N. of nodes": len(self._problems_cache),
                 "Usage stats": self._local_usage,
             }
         )
@@ -542,12 +558,17 @@ class RecursivePrompting(Method):
         - If empty at any stage, the method will not use in-context learning (i.e., zero-shot).
         """
 
-        self._logger.debug(f"Splitting problem {problem.uid} via BFS")
+        self._logger.debug(f"Splitting root problem {problem.uid} via BFS")
         self._split(problem, shots)
 
         unsolved = Queue()
+        self._logger.debug(f"Initializing the BFS queue to {unsolved.queue}")
+
         for dep_id in problem.dependencies:
             unsolved.put(dep_id)
+            self._logger.debug(
+                f"Added root problem dep. {dep_id} to the BFS queue: {unsolved.queue}"
+            )
 
         # Split (or solve directly if necessary) the sub-problems using BFS
         # TODO: parallelize this
@@ -561,6 +582,9 @@ class RecursivePrompting(Method):
                 for subdep_id in dep.dependencies:
                     if not self._problems_cache[subdep_id].is_solved:
                         unsolved.put(subdep_id)
+                        self._logger.debug(
+                            f"Added dep. {subdep_id} to the BFS queue: {unsolved.queue}"
+                        )
 
         # Merge all problems in the graph reusing the DFS recursive logic
         self._solve_dfs(problem, shots, only_merge=True)
