@@ -419,7 +419,7 @@ class RecursivePrompting(Method):
                 "N. instructions shots": len(shots.instructions),
                 "N. merge shots": len(shots.merge),
                 "Root ID": self._current_root_id,
-                "Root obj.": problem,
+                "Root obj.": str(problem),
                 "N. of nodes": len(self._problems_cache),
                 "Local usage": self._local_usage,
                 "Global usage": self.usage,
@@ -453,6 +453,7 @@ class RecursivePrompting(Method):
             {
                 "[RecursivePrompting.generate]": None,
                 "Root ID": self._current_root_id,
+                "Root obj.": str(problem),
                 "Context": context,
                 "Max. tokens": max_tokens,
                 "Output": output,
@@ -558,7 +559,9 @@ class RecursivePrompting(Method):
         - If empty at any stage, the method will not use in-context learning (i.e., zero-shot).
         """
 
-        self._logger.debug(f"Splitting root problem {problem.uid} via BFS")
+        self._logger.debug(
+            f"Splitting root problem {problem.uid} via BFS: {str(problem)} with {len(problem.dependencies)} pre-existing dependencies"
+        )
         self._split(problem, shots)
 
         unsolved = Queue()
@@ -577,7 +580,7 @@ class RecursivePrompting(Method):
             dep = self._problems_cache[dep_id]
 
             if not dep.is_solved:
-                self._logger.debug(f"Splitting problem {dep.uid} via BFS")
+                self._logger.debug(f"Splitting problem {dep.uid} via BFS: {str(dep)}")
                 self._split(dep, shots)
                 for subdep_id in dep.dependencies:
                     if not self._problems_cache[subdep_id].is_solved:
