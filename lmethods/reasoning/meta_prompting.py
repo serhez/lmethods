@@ -136,7 +136,7 @@ class MetaPrompting(Method):
 
         def __init__(
             self,
-            solve: list[tuple[str, str]] = [],
+            solve: list[tuple[str, str]] | None = None,
         ):
             """
             Initialize the shots collection.
@@ -148,7 +148,7 @@ class MetaPrompting(Method):
 
             super().__init__(
                 {
-                    "solve": solve,
+                    "solve": solve if solve is not None else [],
                 }
             )
 
