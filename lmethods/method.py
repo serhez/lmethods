@@ -275,8 +275,8 @@ class Method(ABC):
         """
 
         if isinstance(context, str):
-            output, info = self._generate_impl(context, shots, max_tokens)
             self._reset_state()
+            output, info = self._generate_impl(context, shots, max_tokens)
             return output, info
         elif isinstance(context, Dataset):
             context = list(context.test_set.inputs)
@@ -294,8 +294,8 @@ class Method(ABC):
                 f"[{self.__class__.__name__}] Generating {i+1}/{len(context)}"
             )
 
-            output, info = self._generate_impl(c, shots, max_tokens)
             self._reset_state()
+            output, info = self._generate_impl(c, shots, max_tokens)
 
             outputs.append(output)
             agg_info += info
