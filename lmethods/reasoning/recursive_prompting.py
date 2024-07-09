@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass
 from queue import Queue
+from typing import Any
 
 import n2w
 
@@ -321,6 +322,26 @@ class RecursivePrompting(Method):
         def is_solved(self) -> bool:
             return self.solution is not None
 
+        def to_json(self) -> dict[str, Any]:
+            """
+            Converts the problem to a JSON-serializable dictionary.
+
+            ### Returns
+            ----------
+            The JSON-serializable dictionary.
+            """
+
+            return {
+                "uid": self.uid,
+                "lid": self.lid,
+                "description": self.description,
+                "parent": self.parent,
+                "depth": self.depth,
+                "dependencies": self.dependencies,
+                "instructions": self.instructions,
+                "solution": self.solution,
+            }
+
     @classproperty
     def config_cls(cls) -> type[Config]:
         return cls.Config
@@ -419,7 +440,7 @@ class RecursivePrompting(Method):
                 "N. instructions shots": len(shots.instructions),
                 "N. merge shots": len(shots.merge),
                 "Root ID": self._current_root_id,
-                "Root obj.": str(problem),
+                "Root obj.": problem,
                 "N. of nodes": len(self._problems_cache),
                 "Local usage": self._local_usage,
                 "Global usage": self.usage,
@@ -453,7 +474,7 @@ class RecursivePrompting(Method):
             {
                 "[RecursivePrompting.generate]": None,
                 "Root ID": self._current_root_id,
-                "Root obj.": str(problem),
+                "Root obj.": problem,
                 "Context": context,
                 "Max. tokens": max_tokens,
                 "Output": output,
@@ -560,7 +581,7 @@ class RecursivePrompting(Method):
         """
 
         self._logger.debug(
-            f"Splitting root problem {problem.uid} via BFS: {str(problem)} with {len(problem.dependencies)} pre-existing dependencies"
+            f"Splitting root problem {problem.uid} via BFS: {problem} with {len(problem.dependencies)} pre-existing dependencies"
         )
         self._split(problem, shots)
 
@@ -580,7 +601,7 @@ class RecursivePrompting(Method):
             dep = self._problems_cache[dep_id]
 
             if not dep.is_solved:
-                self._logger.debug(f"Splitting problem {dep.uid} via BFS: {str(dep)}")
+                self._logger.debug(f"Splitting problem {dep.uid} via BFS: {dep}")
                 self._split(dep, shots)
                 for subdep_id in dep.dependencies:
                     if not self._problems_cache[subdep_id].is_solved:
