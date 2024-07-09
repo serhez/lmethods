@@ -426,8 +426,13 @@ class RecursivePrompting(Method):
         max_tokens: int = 500,
     ) -> tuple[str, Method.GenerationInfo]:
         self._current_root_id = self._id_gen.next()
+        # BUG: Python bug?
+        #      If empty dependencies are not passed and we rely on the default value in
+        #      the `_Problem.__init__`, the dependencies are initialized to the
+        #      dependencies array from some other previous instance of the _Problem class
+        #      WTF???!!!
         problem = RecursivePrompting._Problem(
-            self._current_root_id, self._current_root_id, context
+            self._current_root_id, self._current_root_id, context, dependencies=[]
         )
 
         self._logger.debug(
