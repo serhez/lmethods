@@ -22,7 +22,7 @@ class BaseShotsCollection(ABC):
     Child classes can also add properties to access the shots in a more convenient way.
     """
 
-    def __init__(self, shots: dict[str, list[tuple[str, str]]] = {}):
+    def __init__(self, shots: dict[str, list[tuple[str, str]]] | None = None):
         """
         Initialize the base shots collection.
 
@@ -30,6 +30,9 @@ class BaseShotsCollection(ABC):
         ----------
         `shots`: a dictionary of shots for different parts of the method's generation process.
         """
+
+        if shots is None:
+            shots = {}
 
         self._shots: dict[str, list[tuple[str, str]]] = shots
 

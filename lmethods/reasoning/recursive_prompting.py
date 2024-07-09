@@ -135,10 +135,10 @@ class RecursivePrompting(Method):
 
         def __init__(
             self,
-            unit: list[tuple[str, str]] = [],
-            split: list[tuple[str, str]] = [],
-            instructions: list[tuple[str, str]] = [],
-            merge: list[tuple[str, str]] = [],
+            unit: list[tuple[str, str]] | None = None,
+            split: list[tuple[str, str]] | None = None,
+            instructions: list[tuple[str, str]] | None = None,
+            merge: list[tuple[str, str]] | None = None,
         ):
             """
             Initialize the shots collection.
@@ -153,10 +153,10 @@ class RecursivePrompting(Method):
 
             super().__init__(
                 {
-                    "unit": unit,
-                    "split": split,
-                    "instructions": instructions,
-                    "merge": merge,
+                    "unit": unit if unit is not None else [],
+                    "split": split if split is not None else [],
+                    "instructions": instructions if instructions is not None else [],
+                    "merge": merge if merge is not None else [],
                 }
             )
 
@@ -186,7 +186,7 @@ class RecursivePrompting(Method):
             description: str,
             parent: str | None = None,
             depth: int = 1,
-            dependencies: list[str] = [],
+            dependencies: list[str] | None = None,
             instructions: str = "",
             solution: str | None = None,
         ):
@@ -216,7 +216,7 @@ class RecursivePrompting(Method):
 
             self._uid = uid
             self._lid = lid
-            self._dependencies = dependencies
+            self._dependencies = dependencies if dependencies is not None else []
             self._parent = parent
             self._depth = depth
             self.description = description
@@ -426,13 +426,8 @@ class RecursivePrompting(Method):
         max_tokens: int = 500,
     ) -> tuple[str, Method.GenerationInfo]:
         self._current_root_id = self._id_gen.next()
-        # BUG: Python bug?
-        #      If empty dependencies are not passed and we rely on the default value in
-        #      the `_Problem.__init__`, the dependencies are initialized to the
-        #      dependencies array from some other previous instance of the _Problem class
-        #      WTF???!!!
         problem = RecursivePrompting._Problem(
-            self._current_root_id, self._current_root_id, context, dependencies=[]
+            self._current_root_id, self._current_root_id, context
         )
 
         self._logger.debug(
@@ -494,32 +489,41 @@ class RecursivePrompting(Method):
         self,
         problem: _Problem,
         shots: ShotsCollection = ShotsCollection(),
-        visited: set[str] = set(),
         only_merge: bool = False,
+        _visited: set[str] = set(),
     ):
         """
-        Solves a problem using recursive prompting via the DFS strategy and stores the solution in the problem object.
+        Solves a decomposition graph from the root using recursive prompting via the DFS strategy and stores the solutions in the problem objects.
         The method will split the problem into sub-problems while traversing the graph if `only_merge` is `False`; otherwise, it will only unit-solve and merge the graph.
+        The method tracks the visited nodes to detect cycles in the graph; this is only possible if the root problem (i.e., matching `self._current_root_id`) is provided.
+        - IMPORTANT: Undefined behaviour will occur if the method is called with a different root problem.
 
         ### Parameters
         ----------
         `problem`: the problem to be solved.
         `shots`: a shots collection to use for in-context learning.
         - If empty at any stage, the method will not use in-context learning (i.e., zero-shot).
-        `visited`: the set of IDs of the problems that have already been visited via DFS.
         `only_merge`: whether to only merge the sub-solutions to solve the original problem.
         - If `True`, the method will not attempt to split the problem into sub-problems.
+        [DO NOT USE] `_visited`: the set of IDs of the problems that have already been visited via DFS.
+        - Used internally to detect cycles in the graph; should not be used by the user.
         """
+
+        # Reset the default `_visited` value if problem is the root.
+        # This is necessary as default arguments are evaluated only once in Python,
+        # which is the trick we use here to share the visited nodes across recursive calls.
+        if problem.uid == self._current_root_id:
+            _visited = set()
 
         mode = "bfs" if only_merge else "dfs"
 
-        if problem.uid in visited:
+        if problem.uid in _visited:
             self._logger.error(
                 {
                     f"[RecursivePrompting.generate:{mode}] A cycle has been detected.": None,
                     "Depth": problem.depth,
                     "Problem UID": problem.uid,
-                    "Visited nodes": visited,
+                    "Visited nodes": _visited,
                 }
             )
             if self._current_root_id:
@@ -527,7 +531,7 @@ class RecursivePrompting(Method):
             raise RuntimeError(
                 f"[RecursivePrompting.generate:{mode}] The dependencies of the sub-problems contain a cycle."
             )
-        visited.add(problem.uid)
+        _visited.add(problem.uid)
 
         if not only_merge:
             self._logger.debug(f"Splitting problem {problem.uid} via DFS")
@@ -538,7 +542,7 @@ class RecursivePrompting(Method):
         for dep_id in [
             id for id in problem.dependencies if not self._problems_cache[id].is_solved
         ]:
-            self._solve_dfs(self._problems_cache[dep_id], shots, visited, only_merge)
+            self._solve_dfs(self._problems_cache[dep_id], shots, only_merge)
 
         # Obtain merging instructions
         if self._config.elicit_instructions:
@@ -702,7 +706,9 @@ class RecursivePrompting(Method):
         )
         problem.dependencies.extend(subproblems_ids)
 
-    def _set_instructions(self, problem: _Problem, shots: list[tuple[str, str]] = []):
+    def _set_instructions(
+        self, problem: _Problem, shots: list[tuple[str, str]] | None = None
+    ):
         """
         Generate instructions to merge sub-solutions.
 
@@ -719,6 +725,9 @@ class RecursivePrompting(Method):
         ----------
         - The method will not generate instructions if `Config.elicit_instructions` is `False`.
         """
+
+        if shots is None:
+            shots = []
 
         shots_str = construct_shots_str(shots)
         deps_str = self._construct_dependencies_str(problem.dependencies)
