@@ -490,13 +490,12 @@ class RecursivePrompting(Method):
         problem: _Problem,
         shots: ShotsCollection = ShotsCollection(),
         only_merge: bool = False,
-        _visited: set[str] = set(),
+        _visited: set[str] | None = None,
     ):
         """
         Solves a decomposition graph from the root using recursive prompting via the DFS strategy and stores the solutions in the problem objects.
         The method will split the problem into sub-problems while traversing the graph if `only_merge` is `False`; otherwise, it will only unit-solve and merge the graph.
-        The method tracks the visited nodes to detect cycles in the graph; this is only possible if the root problem (i.e., matching `self._current_root_id`) is provided.
-        - IMPORTANT: Undefined behaviour will occur if the method is called with a different root problem.
+        The method tracks the visited nodes to detect cycles in the graph.
 
         ### Parameters
         ----------
@@ -506,13 +505,16 @@ class RecursivePrompting(Method):
         `only_merge`: whether to only merge the sub-solutions to solve the original problem.
         - If `True`, the method will not attempt to split the problem into sub-problems.
         [DO NOT USE] `_visited`: the set of IDs of the problems that have already been visited via DFS.
-        - Used internally to detect cycles in the graph; should not be used by the user.
+        - Used internally to detect cycles in the graph; should not be set by the user.
         """
 
         # Reset the default `_visited` value if problem is the root.
         # This is necessary as default arguments are evaluated only once in Python,
         # which is the trick we use here to share the visited nodes across recursive calls.
-        if problem.uid == self._current_root_id:
+        if _visited is None:
+            self._logger.debug(
+                f"[RecursivePrompting.generate:dfs] Resetting the visited nodes from {_visited}"
+            )
             _visited = set()
 
         mode = "bfs" if only_merge else "dfs"
@@ -542,7 +544,7 @@ class RecursivePrompting(Method):
         for dep_id in [
             id for id in problem.dependencies if not self._problems_cache[id].is_solved
         ]:
-            self._solve_dfs(self._problems_cache[dep_id], shots, only_merge)
+            self._solve_dfs(self._problems_cache[dep_id], shots, only_merge, _visited)
 
         # Obtain merging instructions
         if self._config.elicit_instructions:
