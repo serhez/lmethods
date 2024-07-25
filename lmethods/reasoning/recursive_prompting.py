@@ -320,6 +320,8 @@ class RecursivePrompting(Method):
 
         @property
         def is_solved(self) -> bool:
+            """Whether the problem has been solved."""
+
             return self.solution is not None
 
         def to_json(self) -> dict[str, Any]:
@@ -1075,7 +1077,11 @@ class RecursivePrompting(Method):
         return "".join(
             [
                 f"- Sub-problem {dep.lid}: {dep.description}"
-                + ("" if not dep.is_solved else f" Sub-solution: {dep.solution}\n")
+                + (
+                    ""
+                    if not dep.is_solved
+                    else f" Sub-solution {dep.lid}: {dep.solution}\n"
+                )
                 for dep in [self._problems_cache[id] for id in dependencies]
             ]
         )[:-1]
