@@ -12,6 +12,7 @@ from lmethods.protocols import Logger, Model
 from lmethods.utils import (
     BULLET_POINTS_CHARS,
     END_CHARS,
+    SEP_CHARS,
     BaseShotsCollection,
     DependencySyntax,
     IDGenerator,
@@ -126,7 +127,7 @@ class RecursivePrompting(Method):
         - `root_id`: the ID of the root problem.
         - `nodes`: a dictionary where the keys are the node IDs and the value is a dictionary with the node information. Each node dictionary will have the following keys:
             - `description`: the description of the problem.
-            - `dependencies`: a list of the IDs of the problems that this problem depends on.
+            - `dependencies`: a list of the IDs of the problems that this problem depends on (includes subproblems).
             - `solution`: the solution to the problem.
         """
 
@@ -186,6 +187,7 @@ class RecursivePrompting(Method):
             description: str,
             parent: str | None = None,
             depth: int = 1,
+            subproblems: list[str] | None = None,
             dependencies: list[str] | None = None,
             instructions: str = "",
             solution: str | None = None,
@@ -202,6 +204,7 @@ class RecursivePrompting(Method):
             `parent`: the UID of the parent problem in the decomposition graph.
             - If `None`, the problem is the root of the graph.
             `depth`: the minimum distance from the root of the graph to this node.
+            `subproblems`: the IDs of the subproblems obtained by splitting this problem.
             `dependencies`: the IDs of the problems that this problem depends on.
             `instructions`: the instructions to merge the sub-solutions.
             `solution`: the solution to the problem.
@@ -216,6 +219,7 @@ class RecursivePrompting(Method):
 
             self._uid = uid
             self._lid = lid
+            self._subproblems = subproblems if subproblems is not None else []
             self._dependencies = dependencies if dependencies is not None else []
             self._parent = parent
             self._depth = depth
@@ -275,6 +279,18 @@ class RecursivePrompting(Method):
             """The minimum distance from the root of the graph to this node."""
 
             return self._depth
+
+        @property
+        def subproblems(self) -> list[str]:
+            """The IDs of the subproblems obtained by splitting this problem."""
+
+            return self._subproblems
+
+        @subproblems.setter
+        def subproblems(self, value: list[str]):
+            """Set the IDs of the subproblems obtained by splitting this problem."""
+
+            self._subproblems = value
 
         @property
         def dependencies(self) -> list[str]:
@@ -339,6 +355,7 @@ class RecursivePrompting(Method):
                 "description": self.description,
                 "parent": self.parent,
                 "depth": self.depth,
+                "subproblems": self.subproblems,
                 "dependencies": self.dependencies,
                 "instructions": self.instructions,
                 "solution": self.solution,
@@ -402,6 +419,13 @@ class RecursivePrompting(Method):
             "problem:",
         ]
         self._subproblem_prefixes.extend(BULLET_POINTS_CHARS)
+
+        self._left_dep_char, self._right_dep_char = {
+            DependencySyntax.NONE: (None, None),
+            DependencySyntax.BRACKETS_PARENS: (None, None),
+            DependencySyntax.BRACKETS_ANGLE: ("<", ">"),
+            DependencySyntax.BRACKETS_CURLY: ("{", "}"),
+        }[self._config.dependency_syntax]
 
     def _add_to_cache(self, problems: _Problem | list[_Problem]):
         if isinstance(problems, RecursivePrompting._Problem):
@@ -506,7 +530,7 @@ class RecursivePrompting(Method):
         - If empty at any stage, the method will not use in-context learning (i.e., zero-shot).
         `only_merge`: whether to only merge the sub-solutions to solve the original problem.
         - If `True`, the method will not attempt to split the problem into sub-problems.
-        [DO NOT USE] `_visited`: the set of IDs of the problems that have already been visited via DFS.
+        (DO NOT USE) `_visited`: the set of IDs of the problems that have already been visited via DFS.
         - Used internally to detect cycles in the graph; should not be set by the user.
         """
 
@@ -514,9 +538,6 @@ class RecursivePrompting(Method):
         # This is necessary as default arguments are evaluated only once in Python,
         # which is the trick we use here to share the visited nodes across recursive calls.
         if _visited is None:
-            self._logger.debug(
-                f"[RecursivePrompting.generate:dfs] Resetting the visited nodes from {_visited}"
-            )
             _visited = set()
 
         mode = "bfs" if only_merge else "dfs"
@@ -544,7 +565,9 @@ class RecursivePrompting(Method):
         # Solve each sub-problem recursively (if any)
         # TODO: we can solve sub-problems in parallel here
         for dep_id in [
-            id for id in problem.dependencies if not self._problems_cache[id].is_solved
+            id
+            for id in (problem.subproblems + problem.dependencies)
+            if not self._problems_cache[id].is_solved
         ]:
             self._solve_dfs(self._problems_cache[dep_id], shots, only_merge, _visited)
 
@@ -553,9 +576,6 @@ class RecursivePrompting(Method):
             self._set_instructions(problem, shots.instructions)
 
         # Merge the sub-solutions
-        self._logger.debug(
-            f"Solving problem {problem.uid} with dependencies {problem.dependencies}"
-        )
         self._solve_directly(problem, shots)
 
         self._logger.debug(
@@ -565,11 +585,18 @@ class RecursivePrompting(Method):
                 "Problem UID": problem.uid,
                 "Problem desc.": problem.description,
                 "Problem sol.": problem.solution,
-                "Sub-problems IDs": problem.dependencies,
+                "Sub-problems IDs": problem.subproblems,
+                "Dependencies IDs": problem.dependencies,
                 "Sub-problems desc.": [
-                    self._problems_cache[id].description for id in problem.dependencies
+                    self._problems_cache[id].description for id in problem.subproblems
                 ],
                 "Sub-problems sol.": [
+                    self._problems_cache[id].solution for id in problem.subproblems
+                ],
+                "Dependencies desc.": [
+                    self._problems_cache[id].description for id in problem.dependencies
+                ],
+                "Dependencies sol.": [
                     self._problems_cache[id].solution for id in problem.dependencies
                 ],
                 "Instructions": problem.instructions,
@@ -591,37 +618,49 @@ class RecursivePrompting(Method):
         `instructions`: the instructions to merge the sub-solutions.
         `shots`: a shots collection to use for in-context learning.
         - If empty at any stage, the method will not use in-context learning (i.e., zero-shot).
+
+        ### Notes
+        ----------
+        - The method will recursively solve the dependencies of the problem before splitting it. This means that this is not a
+        pure BFS traversal, but a BFS traversal with DFS-like behavior for dependencies. This is necessary to ensure that all information
+        required from the dependencies' solutions is obtained before attempting to split/solve a problem. This must also be done when
+        splitting because a problem may be split by creating partitions of its data, which may be generated by the dependencies.
         """
+
+        # Even though we are using BFS, we still need to solve dependencies recursively before splitting (DFS-like behavior)
+        unsolved = Queue()
+        for dep_id in problem.dependencies:
+            if not self._problems_cache[dep_id].is_solved:
+                self._logger.debug(
+                    f"Solving dependency with UID {dep_id} before splitting problem with UID {problem.uid} via BFS"
+                )
+                self._solve_bfs(self._problems_cache[dep_id], shots)
 
         self._logger.debug(
             f"Splitting root problem {problem.uid} via BFS: {problem} with {len(problem.dependencies)} pre-existing dependencies"
         )
         self._split(problem, shots)
-
-        unsolved = Queue()
-        self._logger.debug(f"Initializing the BFS queue to {unsolved.queue}")
-
-        for dep_id in problem.dependencies:
+        for dep_id in problem.subproblems:
             unsolved.put(dep_id)
-            self._logger.debug(
-                f"Added root problem dep. {dep_id} to the BFS queue: {unsolved.queue}"
-            )
 
         # Split (or solve directly if necessary) the sub-problems using BFS
         # TODO: parallelize this
         while not unsolved.empty():
-            dep_id = unsolved.get()
-            dep = self._problems_cache[dep_id]
+            p_id = unsolved.get()
+            p = self._problems_cache[p_id]
 
-            if not dep.is_solved:
-                self._logger.debug(f"Splitting problem {dep.uid} via BFS: {dep}")
-                self._split(dep, shots)
-                for subdep_id in dep.dependencies:
-                    if not self._problems_cache[subdep_id].is_solved:
-                        unsolved.put(subdep_id)
+            if not p.is_solved and not p.subproblems:
+                for dep_id in problem.dependencies:
+                    if not self._problems_cache[dep_id].is_solved:
                         self._logger.debug(
-                            f"Added dep. {subdep_id} to the BFS queue: {unsolved.queue}"
+                            f"Solving dependency with UID {dep_id} before splitting problem with UID {p_id} via BFS"
                         )
+                        self._solve_bfs(self._problems_cache[dep_id], shots)
+                self._logger.debug(f"Splitting problem {p.uid} via BFS: {p}")
+                self._split(p, shots)
+                for subp_id in p.subproblems:
+                    if not self._problems_cache[subp_id].is_solved:
+                        unsolved.put(subp_id)
 
         # Merge all problems in the graph reusing the DFS recursive logic
         self._solve_dfs(problem, shots, only_merge=True)
@@ -632,16 +671,71 @@ class RecursivePrompting(Method):
                 "Problem UID": problem.uid,
                 "Problem desc.": problem.description,
                 "Problem sol.": problem.solution,
-                "Sub-problems IDs": problem.dependencies,
+                "Sub-problems IDs": problem.subproblems,
+                "Dependencies IDs": problem.dependencies,
                 "Sub-problems desc.": [
-                    self._problems_cache[id].description for id in problem.dependencies
+                    self._problems_cache[id].description for id in problem.subproblems
                 ],
                 "Sub-problems sol.": [
+                    self._problems_cache[id].solution for id in problem.subproblems
+                ],
+                "Dependencies desc.": [
+                    self._problems_cache[id].description for id in problem.dependencies
+                ],
+                "Dependencies sol.": [
                     self._problems_cache[id].solution for id in problem.dependencies
                 ],
                 "Instructions": problem.instructions,
             }
         )
+
+    def _substitute_dependencies(self, uid: str, description: str) -> str:
+        """
+        Substitute the dependencies in the description of a problem with the solutions of such dependencies.
+
+        ### Parameters
+        ----------
+        `uid`: the UID of the problem.
+        `description`: the description of the problem.
+
+        ### Returns
+        -------
+        The description with the dependencies substituted.
+        """
+
+        # If the dependency syntax does not support embedded dependencies
+        if self._left_dep_char is None:
+            return description
+
+        anchor_i = 0
+        while anchor_i < len(description):
+            left_i = description.find(self._left_dep_char, anchor_i)
+            if left_i == -1:
+                break
+            right_i = description.find(self._right_dep_char, left_i)
+            if right_i == -1:
+                break
+            dep_uid = description[left_i + 1 : right_i].strip()
+
+            if dep_uid not in self._problems_cache:
+                self._logger.warn(
+                    f"[RecursivePrompting.generate:substitute_dependencies] The problem with UID '{dep_uid}' was not found in the cache; it cannot be substituted in problem with UID {uid}."
+                )
+                anchor_i = right_i + 1
+                continue
+            elif not self._problems_cache[dep_uid].is_solved:
+                self._logger.warn(
+                    f"[RecursivePrompting.generate:substitute_dependencies] The dependency with UID '{dep_uid}' has not been solved; it cannot be substituted in problem with UID {uid}."
+                )
+                anchor_i = right_i + 1
+                continue
+
+            dep_sol = self._problems_cache[dep_uid].solution or ""
+            description = description[:left_i] + dep_sol + description[right_i + 1 :]
+
+            anchor_i = left_i + len(dep_sol)
+
+        return description
 
     def _split(
         self,
@@ -666,11 +760,11 @@ class RecursivePrompting(Method):
             self._solve_directly(problem, shots)
             return
 
-        # Split the problem into sub-problems
         shots_str = construct_shots_str(shots.split)
 
+        desc = self._substitute_dependencies(problem.uid, problem.description)
         split_prompt = self._split_prompt.format(
-            problem=problem.description,
+            problem=desc,
             width=n2w.convert(self._config.max_width),
             shots=shots_str,
         ).strip()
@@ -705,10 +799,7 @@ class RecursivePrompting(Method):
             split = ""
 
         subproblems_ids = self._parse_subproblems(split, problem.uid)
-        self._logger.debug(
-            f"Extending the dependencies of problem {problem.uid}: {problem.dependencies} + {subproblems_ids}"
-        )
-        problem.dependencies.extend(subproblems_ids)
+        problem.subproblems.extend(subproblems_ids)
 
     def _set_instructions(
         self, problem: _Problem, shots: list[tuple[str, str]] | None = None
@@ -734,15 +825,21 @@ class RecursivePrompting(Method):
             shots = []
 
         shots_str = construct_shots_str(shots)
-        deps_str = self._construct_dependencies_str(problem.dependencies)
+        if self._config.dependency_syntax == DependencySyntax.BRACKETS_PARENS:
+            deps_str = self._construct_subproblems_str(
+                problem.subproblems + problem.dependencies
+            )
+        else:
+            deps_str = self._construct_subproblems_str(problem.subproblems)
 
         if self._instructions_prompt is None:
             raise RuntimeError(
                 "[RecursivePrompting.generate:instructions] The method is configured to elicit instructions, but no instructions prompt is provided."
             )
 
+        desc = self._substitute_dependencies(problem.uid, problem.description)
         instructions_prompt = self._instructions_prompt.format(
-            problem=problem.description, subproblems=deps_str, shots=shots_str
+            problem=desc, subproblems=deps_str, shots=shots_str
         ).strip()
         instructions_prompt = add_roles_to_context(
             instructions_prompt,
@@ -776,7 +873,8 @@ class RecursivePrompting(Method):
 
     def _solve_directly(self, problem: _Problem, shots: ShotsCollection):
         """
-        Solve a problem directly, either as a unit problem (no dependencies) or by merging (dependencies).
+        Solve a problem directly, either as a unit problem (no subproblems) or by merging (subproblems).
+        - For some dependencies syntaxes, the method will require merging if the problem has dependencies, even if it has no subproblems.
 
         ### Parameters
         ----------
@@ -785,22 +883,22 @@ class RecursivePrompting(Method):
         """
 
         if problem.depth >= self._config.max_depth:
-            case = "max_depth"
+            special_case = ":max_depth"
         elif len(self._problems_cache) >= self._config.max_nodes:
-            case = "max_budget"
-        elif len(problem.dependencies) == 0:
-            case = "unit"
+            special_case = ":max_budget"
         else:
-            case = "merge"
+            special_case = ""
+
+        case, context = self._construct_unit_context(problem, shots)
 
         try:
             output, info = self._model.generate(
-                self._construct_unit_context(problem, shots),
+                context,
                 max_tokens=self._config.max_internal_tokens,
             )
             if output[0][0] is None:
                 self._logger.error(
-                    f"[RecursivePrompting.generate:{case}] The problem with UID '{problem.uid}' was not solved."
+                    f"[RecursivePrompting.generate:{case}{special_case}] The problem with UID '{problem.uid}' was not solved."
                 )
                 problem.solution = ""
             else:
@@ -810,7 +908,7 @@ class RecursivePrompting(Method):
         except Exception as e:
             self._logger.error(
                 {
-                    f"[RecursivePrompting.generate:{case}] The problem with UID '{problem.uid}' could not be solved": None,
+                    f"[RecursivePrompting.generate:{case}{special_case}] The problem with UID '{problem.uid}' could not be solved": None,
                     "Error source": "model",
                     "Error message": str(e),
                 }
@@ -821,13 +919,13 @@ class RecursivePrompting(Method):
         # Insanity check to avoid infinite loops
         if not problem.is_solved:
             self._logger.error(
-                f"[RecursivePrompting.generate:{case}] The problem with UID '{problem.uid}' was not solved."
+                f"[RecursivePrompting.generate:{case}{special_case}] The problem with UID '{problem.uid}' was not solved."
             )
             problem.solution = ""
 
         self._logger.debug(
             {
-                f"[RecursivePrompting.generate:{case}]": None,
+                f"[RecursivePrompting.generate:{case}{special_case}]": None,
                 "Depth": problem.depth,
                 "N. of nodes": len(self._problems_cache),
                 "Model output": output[0][0],
@@ -839,7 +937,7 @@ class RecursivePrompting(Method):
 
     def _construct_unit_context(
         self, problem: _Problem, shots_collection: ShotsCollection
-    ) -> list[dict[str, str]]:
+    ) -> tuple[str, list[dict[str, str]]]:
         """
         Constructs the context to solve a unit problem.
 
@@ -850,7 +948,9 @@ class RecursivePrompting(Method):
 
         ### Returns
         -------
-        The context to solve the unit problem.
+        A tuple containing:
+        - Whether the context is a unit or merge context.
+        - The context to solve the unit problem.
 
         ### Notes
         ----------
@@ -858,12 +958,27 @@ class RecursivePrompting(Method):
         - Otherwise, the unit prompt will be used.
         """
 
-        if len(problem.dependencies) > 0 and all(
-            self._problems_cache[id].is_solved for id in problem.dependencies
-        ):
+        desc = self._substitute_dependencies(problem.uid, problem.description)
+
+        # For the `BRAKETS_PARENS` syntax, dependencies are given to the model in bullet points too when merging
+        # For other syntaxes, the solutions of dependencies are directly embedded in the context
+        subproblems_plus_deps = problem.dependencies + problem.subproblems
+        if (
+            (
+                self._config.dependency_syntax == DependencySyntax.BRACKETS_PARENS
+                and len(subproblems_plus_deps) > 0
+            )
+            or len(problem.subproblems) > 0
+        ) and all(self._problems_cache[id].is_solved for id in subproblems_plus_deps):
+            if self._config.dependency_syntax == DependencySyntax.BRACKETS_PARENS:
+                deps_str = self._construct_subproblems_str(
+                    problem.subproblems + problem.dependencies
+                )
+            else:
+                deps_str = self._construct_subproblems_str(problem.subproblems)
             context = self._merge_prompt.format(
-                problem=problem.description,
-                subsolutions=self._construct_dependencies_str(problem.dependencies),
+                problem=desc,
+                subsolutions=deps_str,
                 instructions=problem.instructions,
                 shots=construct_shots_str(shots_collection.merge),
             ).strip()
@@ -872,9 +987,10 @@ class RecursivePrompting(Method):
                 system_chars=self._config.merge_first_chars_as_system,
                 assistant_chars=self._config.merge_last_chars_as_assistant,
             )
+            case = "merge"
         else:
             context = self._unit_prompt.format(
-                problem=problem.description,
+                problem=desc,
                 shots=construct_shots_str(shots_collection.unit),
             ).strip()
             context = add_roles_to_context(
@@ -882,8 +998,9 @@ class RecursivePrompting(Method):
                 system_chars=self._config.unit_first_chars_as_system,
                 assistant_chars=self._config.unit_last_chars_as_assistant,
             )
+            case = "unit"
 
-        return context
+        return case, context
 
     def _parse_subproblems(self, output: str, parent_uid: str) -> list[str]:
         """
@@ -931,18 +1048,18 @@ class RecursivePrompting(Method):
                     line = line[len(prefix) :].strip()
 
                     # Construct the problem
-                    p = self._parse_raw_subproblem(line, local_i, parent_uid)
+                    subp = self._parse_raw_subproblem(line, local_i, parent_uid)
                     local_i += 1
 
                     # Create global IDs; this is necessary because the IDs generated
                     # by the model are likely to repeat across independent splitting steps.
                     # The keys of the dictionary are still the local IDs.
-                    if p.lid in subproblems_dict:
+                    if subp.lid in subproblems_dict:
                         self._logger.warn(
-                            f"[RecursivePrompting.parse_subproblems] The local ID '{p.lid}' is repeated in the output. Incoming dependencies will be ignored."
+                            f"[RecursivePrompting.parse_subproblems] The local ID '{subp.lid}' is repeated in the output. Incoming dependencies will be ignored."
                         )
-                        p.lid = p.uid
-                    subproblems_dict[p.lid] = p
+                        subp.lid = subp.uid
+                    subproblems_dict[subp.lid] = subp
 
                     break
 
@@ -964,26 +1081,51 @@ class RecursivePrompting(Method):
             )
             return []
 
-        # Substitute the local IDs with the global IDs in the dependencies
-        for p_local_id, p in subproblems_dict.items():
+        # Substitute the dependencies' local IDs with their global IDs
+        for subp_lid, subp in subproblems_dict.items():
             global_deps = []
-            for dep_local_id in p.dependencies:
-                if dep_local_id in subproblems_dict:
-                    global_deps.append(subproblems_dict[dep_local_id].uid)
+            for dep_lid in subp.dependencies:
+                if dep_lid in subproblems_dict:
+                    global_deps.append(subproblems_dict[dep_lid].uid)
                 else:
                     self._logger.warn(
-                        f"[RecursivePrompting.parse_subproblems] The dependency with local ID '{dep_local_id}' "
-                        "of the problem with local ID '{p_local_id}' does not exist. "
-                        "It may have been removed if the maximum num. of nodes was exceeded. Ignoring the dependency."
+                        f"[RecursivePrompting.parse_subproblems] The sub-problem or dependency with local ID '{dep_lid}' "
+                        f"of the problem with local ID '{subp_lid}' does not exist. "
+                        "It may have been removed if the maximum num. of nodes was exceeded. Ignoring it."
                     )
-            self._logger.debug(
-                f"Extending same-depth dependencies of problem {p.uid}: {p.dependencies} + {global_deps}"
-            )
-            p.dependencies.extend(global_deps)
+            subp.dependencies = global_deps
+
+            # We also need to replace embedded references to the dependencies
+            if self._left_dep_char is not None:
+                anchor_i = 0
+                while anchor_i < len(subp.description):
+                    left_i = subp.description.find(self._left_dep_char, anchor_i)
+                    if left_i == -1:
+                        break
+                    right_i = subp.description.find(self._right_dep_char, left_i)
+                    if right_i == -1:
+                        break
+                    dep_lid = subp.description[left_i + 1 : right_i].strip()
+
+                    if dep_lid in subproblems_dict:
+                        dep_uid = subproblems_dict[dep_lid].uid
+                        subp.description = (
+                            subp.description[:left_i]
+                            + dep_uid
+                            + subp.description[right_i + 1 :]
+                        )
+                        anchor_i = left_i + len(dep_uid)
+                    else:
+                        self._logger.warn(
+                            f"[RecursivePrompting.parse_subproblems] The embedded dependency with local ID '{dep_lid}' "
+                            f"in the problem with local ID '{subp_lid}' does not exist. "
+                            "It may have been removed if the maximum num. of nodes was exceeded."
+                        )
+                        anchor_i = right_i + 1
 
         # Add the sub-problems to the cache
-        for p in subproblems_dict.values():
-            self._add_to_cache(p)
+        for subp in subproblems_dict.values():
+            self._add_to_cache(subp)
 
         return [p.uid for p in list(subproblems_dict.values())]
 
@@ -1021,7 +1163,11 @@ class RecursivePrompting(Method):
             desc = raw_problem
             deps_ids = []
 
-        elif self._config.dependency_syntax == DependencySyntax.BRACKETS_PARENS:
+        elif self._config.dependency_syntax in [
+            DependencySyntax.BRACKETS_PARENS,
+            DependencySyntax.BRACKETS_ANGLE,
+            DependencySyntax.BRACKETS_CURLY,
+        ]:
             desc = raw_problem
 
             # ID
@@ -1039,27 +1185,41 @@ class RecursivePrompting(Method):
                 lid = str(problem_idx)
 
             # Dependencies
-            try:
-                if not desc.startswith("("):
-                    raise ValueError
-                right_paren_i = desc.index(")")
-                deps_ids = [id.strip() for id in desc[1:right_paren_i].split(",")]
-                if len(deps_ids) == 0 or (len(deps_ids) == 1 and deps_ids[0] == ""):
+            if self._config.dependency_syntax == DependencySyntax.BRACKETS_PARENS:
+                try:
+                    if not desc.startswith("("):
+                        raise ValueError
+                    right_paren_i = desc.index(")")
+                    deps_ids = [id.strip() for id in desc[1:right_paren_i].split(",")]
+                    if len(deps_ids) == 0 or (len(deps_ids) == 1 and deps_ids[0] == ""):
+                        deps_ids = []
+                    desc = desc[right_paren_i + 1 :]
+                except ValueError:
+                    self._logger.warn(
+                        "[RecursivePrompting.generate] The dependencies of the problem could not be found for dependency syntax 'BRACKETS_PARENS'."
+                    )
                     deps_ids = []
-                desc = desc[right_paren_i + 1 :]
-            except ValueError:
-                self._logger.warn(
-                    "[RecursivePrompting.generate] The dependencies of the problem could not be found for dependency syntax 'BRACKETS_PARENS'."
-                )
+            else:
                 deps_ids = []
-
-            # Description
-            desc = desc.strip()
+                while True:
+                    left_i = desc.find(self._left_dep_char)
+                    if left_i == -1:
+                        break
+                    right_i = desc.find(self._right_dep_char, left_i)
+                    if right_i == -1:
+                        break
+                    deps_ids.append(desc[left_i + 1 : right_i].strip())
+                    desc = desc[:left_i] + desc[right_i + 1 :]
 
         else:
             raise NotImplementedError(
                 "The specified dependency syntax is not implemented."
             )
+
+        # Description
+        if desc[0] in SEP_CHARS:
+            desc = desc[1:]
+        desc = desc.strip()
 
         return RecursivePrompting._Problem(
             uid,
@@ -1070,8 +1230,8 @@ class RecursivePrompting(Method):
             deps_ids,
         )
 
-    def _construct_dependencies_str(self, dependencies: list[str]) -> str:
-        if len(dependencies) == 0:
+    def _construct_subproblems_str(self, subproblems: list[str]) -> str:
+        if len(subproblems) == 0:
             return ""
 
         return "".join(
@@ -1082,7 +1242,7 @@ class RecursivePrompting(Method):
                     if not dep.is_solved
                     else f" Sub-solution {dep.lid}: {dep.solution}\n"
                 )
-                for dep in [self._problems_cache[id] for id in dependencies]
+                for dep in [self._problems_cache[id] for id in subproblems]
             ]
         )[:-1]
 
@@ -1110,7 +1270,7 @@ class RecursivePrompting(Method):
         for id, problem in self._problems_cache.items():
             nodes[id] = {
                 "description": problem.description,
-                "dependencies": problem.dependencies,
+                "dependencies": problem.subproblems + problem.dependencies,
                 "solution": problem.solution,
             }
 

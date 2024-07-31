@@ -6,6 +6,7 @@ from .logging import NullLogger
 from .prompting import (
     BULLET_POINTS_CHARS,
     END_CHARS,
+    SEP_CHARS,
     BaseShotsCollection,
     add_roles_to_context,
     construct_shots_str,

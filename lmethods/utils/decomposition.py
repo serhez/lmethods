@@ -9,8 +9,20 @@ class DependencySyntax(str, Enum):
 
     BRACKETS_PARENS = "brackets_parens"
     """
-    The id of the sub-problem within brackets, followed by the comma-separated ids of the sub-problems it depends on within parenthesis.
+    The ID of the sub-problem within brackets, followed by the comma-separated ids of the sub-problems it depends on within parenthesis.
     E.g., "[P3](P0, P2)".
+    """
+
+    BRACKETS_ANGLE = "brackets_angle"
+    """
+    The ID of the sub-problem within brackets, followed by the description which can contain dependencies whose IDs are specified between angle brackets.
+    E.g., "[P3] Some description that depends on <P1> and <P2>.".
+    """
+
+    BRACKETS_CURLY = "brackets_curly"
+    """
+    The ID of the sub-problem within brackets, followed by the description which can contain dependencies whose IDs are specified between curly braces.
+    E.g., "[P3] Some description that depends on {P1} and {P2}.".
     """
 
 
