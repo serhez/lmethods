@@ -226,6 +226,7 @@ class RecursivePrompting(Method):
             self.description = description
             self.instructions = instructions
             self.solution = solution
+            self._split = False
 
         @property
         def uid(self) -> str:
@@ -339,6 +340,18 @@ class RecursivePrompting(Method):
             """Whether the problem has been solved."""
 
             return self.solution is not None
+
+        @property
+        def is_split(self) -> bool:
+            """Whether the problem has been split."""
+
+            return self._split
+
+        @is_split.setter
+        def is_split(self, value: bool):
+            """Set whether the problem has been split."""
+
+            self._split = value
 
         def to_json(self) -> dict[str, Any]:
             """
@@ -515,7 +528,6 @@ class RecursivePrompting(Method):
         self,
         problem: _Problem,
         shots: ShotsCollection = ShotsCollection(),
-        only_merge: bool = False,
         _visited: set[str] | None = None,
     ):
         """
@@ -528,8 +540,6 @@ class RecursivePrompting(Method):
         `problem`: the problem to be solved.
         `shots`: a shots collection to use for in-context learning.
         - If empty at any stage, the method will not use in-context learning (i.e., zero-shot).
-        `only_merge`: whether to only merge the sub-solutions to solve the original problem.
-        - If `True`, the method will not attempt to split the problem into sub-problems.
         (DO NOT USE) `_visited`: the set of IDs of the problems that have already been visited via DFS.
         - Used internally to detect cycles in the graph; should not be set by the user.
         """
@@ -540,12 +550,10 @@ class RecursivePrompting(Method):
         if _visited is None:
             _visited = set()
 
-        mode = "bfs" if only_merge else "dfs"
-
         if problem.uid in _visited:
             self._logger.error(
                 {
-                    f"[RecursivePrompting.generate:{mode}] A cycle has been detected.": None,
+                    "[RecursivePrompting.generate:dfs] A cycle has been detected.": None,
                     "Depth": problem.depth,
                     "Problem UID": problem.uid,
                     "Visited nodes": _visited,
@@ -554,11 +562,11 @@ class RecursivePrompting(Method):
             if self._current_root_id:
                 self._save_graph(self._current_root_id)
             raise RuntimeError(
-                f"[RecursivePrompting.generate:{mode}] The dependencies of the sub-problems contain a cycle."
+                f"[RecursivePrompting.generate:dfs] The dependencies of the sub-problems contain a cycle."
             )
         _visited.add(problem.uid)
 
-        if not only_merge:
+        if not problem.is_split:
             self._logger.debug(f"Splitting problem {problem.uid} via DFS")
             self._split(problem, shots)
 
@@ -569,7 +577,7 @@ class RecursivePrompting(Method):
             for id in (problem.subproblems + problem.dependencies)
             if not self._problems_cache[id].is_solved
         ]:
-            self._solve_dfs(self._problems_cache[dep_id], shots, only_merge, _visited)
+            self._solve_dfs(self._problems_cache[dep_id], shots, _visited)
 
         # Obtain merging instructions
         if self._config.elicit_instructions:
@@ -580,7 +588,7 @@ class RecursivePrompting(Method):
 
         self._logger.debug(
             {
-                f"[RecursivePrompting.generate:{mode}]": None,
+                f"[RecursivePrompting.generate:dfs]": None,
                 "Depth": problem.depth,
                 "Problem UID": problem.uid,
                 "Problem desc.": problem.description,
@@ -639,33 +647,33 @@ class RecursivePrompting(Method):
         self._logger.debug(
             f"Splitting root problem {problem.uid} via BFS: {problem} with {len(problem.dependencies)} pre-existing dependencies"
         )
-        self._split(problem, shots)
+        if not problem.is_split:
+            self._split(problem, shots)
         for dep_id in problem.subproblems:
             unsolved.put(dep_id)
 
         # Split (or solve directly if necessary) the sub-problems using BFS
         # TODO: parallelize this
-        visited = set()
         while not unsolved.empty():
             p_id = unsolved.get()
             p = self._problems_cache[p_id]
 
-            if p.uid not in visited:
-                for dep_id in problem.dependencies:
+            if not p.is_split:
+                for dep_id in p.dependencies:
                     if not self._problems_cache[dep_id].is_solved:
                         self._logger.debug(
                             f"Solving dependency with UID {dep_id} before splitting problem with UID {p_id} via BFS"
                         )
                         self._solve_bfs(self._problems_cache[dep_id], shots)
                 self._logger.debug(f"Splitting problem {p.uid} via BFS")
-                self._split(p, shots)
-                visited.add(p.uid)
+                if not p.is_split:
+                    self._split(p, shots)
                 for subp_id in p.subproblems:
                     if not self._problems_cache[subp_id].is_solved:
                         unsolved.put(subp_id)
 
         # Merge all problems in the graph reusing the DFS recursive logic
-        self._solve_dfs(problem, shots, only_merge=True)
+        self._solve_dfs(problem, shots)
 
         self._logger.debug(
             {
@@ -802,6 +810,7 @@ class RecursivePrompting(Method):
 
         subproblems_ids = self._parse_subproblems(split, problem.uid)
         problem.subproblems = subproblems_ids
+        problem.is_split = True
 
     def _set_instructions(
         self, problem: _Problem, shots: list[tuple[str, str]] | None = None
