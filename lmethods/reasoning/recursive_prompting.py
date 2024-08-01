@@ -645,19 +645,21 @@ class RecursivePrompting(Method):
 
         # Split (or solve directly if necessary) the sub-problems using BFS
         # TODO: parallelize this
+        visited = set()
         while not unsolved.empty():
             p_id = unsolved.get()
             p = self._problems_cache[p_id]
 
-            if not p.is_solved and not p.subproblems:
+            if p.uid not in visited:
                 for dep_id in problem.dependencies:
                     if not self._problems_cache[dep_id].is_solved:
                         self._logger.debug(
                             f"Solving dependency with UID {dep_id} before splitting problem with UID {p_id} via BFS"
                         )
                         self._solve_bfs(self._problems_cache[dep_id], shots)
-                self._logger.debug(f"Splitting problem {p.uid} via BFS: {p}")
+                self._logger.debug(f"Splitting problem {p.uid} via BFS")
                 self._split(p, shots)
+                visited.add(p.uid)
                 for subp_id in p.subproblems:
                     if not self._problems_cache[subp_id].is_solved:
                         unsolved.put(subp_id)
@@ -799,7 +801,7 @@ class RecursivePrompting(Method):
             split = ""
 
         subproblems_ids = self._parse_subproblems(split, problem.uid)
-        problem.subproblems.extend(subproblems_ids)
+        problem.subproblems = subproblems_ids
 
     def _set_instructions(
         self, problem: _Problem, shots: list[tuple[str, str]] | None = None
@@ -962,7 +964,7 @@ class RecursivePrompting(Method):
 
         # For the `BRAKETS_PARENS` syntax, dependencies are given to the model in bullet points too when merging
         # For other syntaxes, the solutions of dependencies are directly embedded in the context
-        subproblems_plus_deps = problem.dependencies + problem.subproblems
+        subproblems_plus_deps = problem.subproblems + problem.dependencies
         if (
             (
                 self._config.dependency_syntax == DependencySyntax.BRACKETS_PARENS
@@ -971,9 +973,7 @@ class RecursivePrompting(Method):
             or len(problem.subproblems) > 0
         ) and all(self._problems_cache[id].is_solved for id in subproblems_plus_deps):
             if self._config.dependency_syntax == DependencySyntax.BRACKETS_PARENS:
-                deps_str = self._construct_subproblems_str(
-                    problem.subproblems + problem.dependencies
-                )
+                deps_str = self._construct_subproblems_str(subproblems_plus_deps)
             else:
                 deps_str = self._construct_subproblems_str(problem.subproblems)
             context = self._merge_prompt.format(
@@ -1222,12 +1222,13 @@ class RecursivePrompting(Method):
         desc = desc.strip()
 
         return RecursivePrompting._Problem(
-            uid,
-            lid,
-            desc,
-            parent_uid,
-            self._problems_cache[parent_uid].depth + 1,
-            deps_ids,
+            uid=uid,
+            lid=lid,
+            description=desc,
+            parent=parent_uid,
+            depth=self._problems_cache[parent_uid].depth + 1,
+            subproblems=[],
+            dependencies=deps_ids,
         )
 
     def _construct_subproblems_str(self, subproblems: list[str]) -> str:
