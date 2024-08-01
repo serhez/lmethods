@@ -717,6 +717,10 @@ class RecursivePrompting(Method):
         if self._left_dep_char is None:
             return description
 
+        self._logger.debug(
+            f"Substituting dependencies in problem with UID {uid}: {description}"
+        )
+
         anchor_i = 0
         while anchor_i < len(description):
             left_i = description.find(self._left_dep_char, anchor_i)
@@ -742,6 +746,15 @@ class RecursivePrompting(Method):
 
             dep_sol = self._problems_cache[dep_uid].solution or ""
             description = description[:left_i] + dep_sol + description[right_i + 1 :]
+            self._logger.debug(
+                {
+                    f"[RecursivePrompting.generate:substitute_dependencies]": None,
+                    "Problem UID": uid,
+                    "Dependency UID": dep_uid,
+                    "Dependency sol.": self._problems_cache[dep_uid].solution,
+                    "Description": description,
+                }
+            )
 
             anchor_i = left_i + len(dep_sol)
 
@@ -1120,7 +1133,9 @@ class RecursivePrompting(Method):
                         dep_uid = subproblems_dict[dep_lid].uid
                         subp.description = (
                             subp.description[:left_i]
+                            + self._left_dep_char
                             + dep_uid
+                            + self._right_dep_char
                             + subp.description[right_i + 1 :]
                         )
                         anchor_i = left_i + len(dep_uid)
