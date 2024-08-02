@@ -1120,14 +1120,30 @@ class RecursivePrompting(Method):
             subp.dependencies = global_deps
 
             # We also need to replace embedded references to the dependencies
+            # TODO: remove
+            self._logger.debug(
+                f"left dep char: {self._left_dep_char}, right dep char: {self._right_dep_char}"
+            )
             if self._left_dep_char is not None:
                 anchor_i = 0
+                # TODO: remove
+                self._logger.debug(
+                    f"len(subp.description): {len(subp.description)}, subp.description: {subp.description}"
+                )
                 while anchor_i < len(subp.description):
                     left_i = subp.description.find(self._left_dep_char, anchor_i)
                     if left_i == -1:
+                        # TODO: remove
+                        self._logger.debug(
+                            f"Did not find left dep char in {subp.description}"
+                        )
                         break
                     right_i = subp.description.find(self._right_dep_char, left_i)
                     if right_i == -1:
+                        # TODO: remove
+                        self._logger.debug(
+                            f"Did not find right dep char in {subp.description}"
+                        )
                         break
                     dep_lid = subp.description[left_i + 1 : right_i].strip()
                     # TODO: remove
@@ -1156,6 +1172,11 @@ class RecursivePrompting(Method):
                             "It may have been removed if the maximum num. of nodes was exceeded."
                         )
                         anchor_i = right_i + 1
+
+                    # TODO: remove
+                    self._logger.debug(
+                        f"anchor_i: {anchor_i}, len(subp.description): {len(subp.description)}, subp.description: {subp.description}"
+                    )
 
         # Add the sub-problems to the cache
         for subp in subproblems_dict.values():
