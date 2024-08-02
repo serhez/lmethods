@@ -717,6 +717,7 @@ class RecursivePrompting(Method):
         if self._left_dep_char is None:
             return description
 
+        # TODO: remove
         self._logger.debug(
             f"Substituting dependencies in problem with UID {uid}: {description}"
         )
@@ -746,6 +747,7 @@ class RecursivePrompting(Method):
 
             dep_sol = self._problems_cache[dep_uid].solution or ""
             description = description[:left_i] + dep_sol + description[right_i + 1 :]
+            # TODO: remove
             self._logger.debug(
                 {
                     f"[RecursivePrompting.generate:substitute_dependencies]": None,
@@ -1128,6 +1130,10 @@ class RecursivePrompting(Method):
                     if right_i == -1:
                         break
                     dep_lid = subp.description[left_i + 1 : right_i].strip()
+                    # TODO: remove
+                    self._logger.debug(
+                        f'Replacing local ref {dep_lid} for {subproblems_dict[dep_lid].uid} in "{subp.description}"'
+                    )
 
                     if dep_lid in subproblems_dict:
                         dep_uid = subproblems_dict[dep_lid].uid
@@ -1139,6 +1145,10 @@ class RecursivePrompting(Method):
                             + subp.description[right_i + 1 :]
                         )
                         anchor_i = left_i + len(dep_uid)
+                        # TODO: remove
+                        self._logger.debug(
+                            f"Replaced local ref {dep_lid}: {subp.description}"
+                        )
                     else:
                         self._logger.warn(
                             f"[RecursivePrompting.parse_subproblems] The embedded dependency with local ID '{dep_lid}' "
