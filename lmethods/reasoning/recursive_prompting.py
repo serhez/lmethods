@@ -1264,7 +1264,6 @@ class RecursivePrompting(Method):
                     if right_i == -1:
                         break
                     deps_ids.append(desc[left_i + 1 : right_i].strip())
-                    desc = desc[:left_i] + desc[right_i + 1 :]
 
         else:
             raise NotImplementedError(
