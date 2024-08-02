@@ -1135,14 +1135,14 @@ class RecursivePrompting(Method):
                     if left_i == -1:
                         # TODO: remove
                         self._logger.debug(
-                            f"Did not find left dep char in {subp.description}"
+                            f'Did not find left dep char in "{subp.description}"'
                         )
                         break
                     right_i = subp.description.find(self._right_dep_char, left_i)
                     if right_i == -1:
                         # TODO: remove
                         self._logger.debug(
-                            f"Did not find right dep char in {subp.description}"
+                            f'Did not find right dep char in "{subp.description}"'
                         )
                         break
                     dep_lid = subp.description[left_i + 1 : right_i].strip()
