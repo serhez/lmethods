@@ -645,7 +645,7 @@ class RecursivePrompting(Method):
                 self._solve_bfs(self._problems_cache[dep_id], shots)
 
         self._logger.debug(
-            f"Splitting root problem {problem.uid} via BFS: {problem} with {len(problem.dependencies)} pre-existing dependencies"
+            f"Splitting root problem {problem.uid} via BFS with {len(problem.dependencies)} pre-existing dependencies"
         )
         if not problem.is_split:
             self._split(problem, shots)
@@ -734,13 +734,15 @@ class RecursivePrompting(Method):
 
             if dep_uid not in self._problems_cache:
                 self._logger.warn(
-                    f"[RecursivePrompting.generate:substitute_dependencies] The problem with UID '{dep_uid}' was not found in the cache; it cannot be substituted in problem with UID {uid}."
+                    f"[RecursivePrompting.generate:substitute_dependencies] The problem with UID '{dep_uid}' was"
+                    f"not found in the cache; it cannot be substituted in problem with UID {uid}."
                 )
                 anchor_i = right_i + 1
                 continue
             elif not self._problems_cache[dep_uid].is_solved:
                 self._logger.warn(
-                    f"[RecursivePrompting.generate:substitute_dependencies] The dependency with UID '{dep_uid}' has not been solved; it cannot be substituted in problem with UID {uid}."
+                    f"[RecursivePrompting.generate:substitute_dependencies] The dependency with UID '{dep_uid}' has"
+                    f"not been solved; it cannot be substituted in problem with UID {uid}."
                 )
                 anchor_i = right_i + 1
                 continue
@@ -1256,14 +1258,16 @@ class RecursivePrompting(Method):
                     deps_ids = []
             else:
                 deps_ids = []
-                while True:
-                    left_i = desc.find(self._left_dep_char)
+                anchor_i = 0
+                while anchor_i < len(desc):
+                    left_i = desc.find(self._left_dep_char, anchor_i)
                     if left_i == -1:
                         break
                     right_i = desc.find(self._right_dep_char, left_i)
                     if right_i == -1:
                         break
                     deps_ids.append(desc[left_i + 1 : right_i].strip())
+                    anchor_i = right_i + 1
 
         else:
             raise NotImplementedError(
