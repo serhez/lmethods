@@ -699,6 +699,26 @@ class RecursivePrompting(Method):
             }
         )
 
+    def _clean_description(self, description: str) -> str:
+        """
+        Clean a description by removing unnecessary whitespace and punctuation.
+
+        ### Parameters
+        ----------
+        `description`: the description to be cleaned.
+
+        ### Returns
+        -------
+        The cleaned description.
+        """
+
+        # Remove double punctuation
+        for c1 in SEP_CHARS:
+            for c2 in SEP_CHARS:
+                description = description.replace(f"{c1}{c2}", c2)
+
+        return description.strip()
+
     def _substitute_dependencies(self, uid: str, description: str) -> str:
         """
         Substitute the dependencies in the description of a problem with the solutions of such dependencies.
@@ -744,6 +764,7 @@ class RecursivePrompting(Method):
 
             dep_sol = self._problems_cache[dep_uid].solution or ""
             description = description[:left_i] + dep_sol + description[right_i + 1 :]
+            description = self._clean_description(description)
             anchor_i = left_i + len(dep_sol)
 
         return description

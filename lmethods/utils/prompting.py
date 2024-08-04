@@ -1,7 +1,7 @@
 from abc import ABC
 from typing import overload
 
-SEP_CHARS = [".", "!", "?", ":", ";", ",", "|", "/"]
+SEP_CHARS = [".", "!", "?", ":", ";", ",", "|"]
 """The characters that can be used as separators."""
 
 END_CHARS = [".", "!", "?"]
