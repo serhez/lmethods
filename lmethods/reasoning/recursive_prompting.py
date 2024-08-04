@@ -764,8 +764,10 @@ class RecursivePrompting(Method):
 
             dep_sol = self._problems_cache[dep_uid].solution or ""
             description = description[:left_i] + dep_sol + description[right_i + 1 :]
+            len_diff = len(description)
             description = self._clean_description(description)
-            anchor_i = left_i + len(dep_sol)
+            len_diff -= len(description)
+            anchor_i = left_i + len(dep_sol) - len_diff
 
         return description
 
