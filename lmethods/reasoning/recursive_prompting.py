@@ -717,11 +717,6 @@ class RecursivePrompting(Method):
         if self._left_dep_char is None:
             return description
 
-        # TODO: remove
-        self._logger.debug(
-            f"Substituting dependencies in problem with UID {uid}: {description}"
-        )
-
         anchor_i = 0
         while anchor_i < len(description):
             left_i = description.find(self._left_dep_char, anchor_i)
@@ -749,17 +744,6 @@ class RecursivePrompting(Method):
 
             dep_sol = self._problems_cache[dep_uid].solution or ""
             description = description[:left_i] + dep_sol + description[right_i + 1 :]
-            # TODO: remove
-            self._logger.debug(
-                {
-                    f"[RecursivePrompting.generate:substitute_dependencies]": None,
-                    "Problem UID": uid,
-                    "Dependency UID": dep_uid,
-                    "Dependency sol.": self._problems_cache[dep_uid].solution,
-                    "Description": description,
-                }
-            )
-
             anchor_i = left_i + len(dep_sol)
 
         return description
@@ -1122,36 +1106,16 @@ class RecursivePrompting(Method):
             subp.dependencies = global_deps
 
             # We also need to replace embedded references to the dependencies
-            # TODO: remove
-            self._logger.debug(
-                f"left dep char: {self._left_dep_char}, right dep char: {self._right_dep_char}"
-            )
             if self._left_dep_char is not None:
                 anchor_i = 0
-                # TODO: remove
-                self._logger.debug(
-                    f"len(subp.description): {len(subp.description)}, subp.description: {subp.description}"
-                )
                 while anchor_i < len(subp.description):
                     left_i = subp.description.find(self._left_dep_char, anchor_i)
                     if left_i == -1:
-                        # TODO: remove
-                        self._logger.debug(
-                            f'Did not find left dep char in "{subp.description}"'
-                        )
                         break
                     right_i = subp.description.find(self._right_dep_char, left_i)
                     if right_i == -1:
-                        # TODO: remove
-                        self._logger.debug(
-                            f'Did not find right dep char in "{subp.description}"'
-                        )
                         break
                     dep_lid = subp.description[left_i + 1 : right_i].strip()
-                    # TODO: remove
-                    self._logger.debug(
-                        f'Replacing local ref {dep_lid} for {subproblems_dict[dep_lid].uid} in "{subp.description}"'
-                    )
 
                     if dep_lid in subproblems_dict:
                         dep_uid = subproblems_dict[dep_lid].uid
@@ -1163,10 +1127,6 @@ class RecursivePrompting(Method):
                             + subp.description[right_i + 1 :]
                         )
                         anchor_i = left_i + len(dep_uid)
-                        # TODO: remove
-                        self._logger.debug(
-                            f"Replaced local ref {dep_lid}: {subp.description}"
-                        )
                     else:
                         self._logger.warn(
                             f"[RecursivePrompting.parse_subproblems] The embedded dependency with local ID '{dep_lid}' "
@@ -1174,11 +1134,6 @@ class RecursivePrompting(Method):
                             "It may have been removed if the maximum num. of nodes was exceeded."
                         )
                         anchor_i = right_i + 1
-
-                    # TODO: remove
-                    self._logger.debug(
-                        f"anchor_i: {anchor_i}, len(subp.description): {len(subp.description)}, subp.description: {subp.description}"
-                    )
 
         # Add the sub-problems to the cache
         for subp in subproblems_dict.values():
