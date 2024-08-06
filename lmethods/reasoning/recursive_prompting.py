@@ -62,6 +62,9 @@ class RecursivePrompting(Method):
         max_internal_tokens: int = 500
         """The maximum number of tokens that can be generated in internal calls to the model (e.g., decomposing, generating instructions, merging sub-solutions, etc.)."""
 
+        unit_statement: str = "this is a unit problem"
+        """The statement elicited from the model to indicates that a problem is a unit problem."""
+
         elicit_instructions: bool = False
         """
         Whether to elicit instructions to merge sub-solutions to solve the original problem.
@@ -832,7 +835,13 @@ class RecursivePrompting(Method):
             )
             split = ""
 
-        subproblems_ids = self._parse_subproblems(split, problem.uid)
+        if self._config.unit_statement in split.lower():
+            subproblems_ids = []
+            self._logger.debug(
+                f"Found the unit statement in the splitting of problem with UID {problem.uid}"
+            )
+        else:
+            subproblems_ids = self._parse_subproblems(split, problem.uid)
         problem.subproblems = subproblems_ids
         problem.is_split = True
 
