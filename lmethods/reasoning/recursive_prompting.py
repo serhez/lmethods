@@ -62,6 +62,9 @@ class RecursivePrompting(Method):
         max_internal_tokens: int = 500
         """The maximum number of tokens that can be generated in internal calls to the model (e.g., decomposing, generating instructions, merging sub-solutions, etc.)."""
 
+        n_context_ancestors: int = 0
+        """The maximum number of ancestors' descriptions to include in the context of splitting, unit-solving and merging operations."""
+
         unit_statement: str = "this is a unit problem"
         """The statement elicited from the model to indicates that a problem is a unit problem."""
 
@@ -802,6 +805,7 @@ class RecursivePrompting(Method):
         desc = self._substitute_dependencies(problem.uid, problem.description)
         split_prompt = self._split_prompt.format(
             problem=desc,
+            ancestors=self._construct_ancestors_context(problem),
             width=n2w.convert(self._config.max_width),
             shots=shots_str,
         ).strip()
@@ -883,7 +887,10 @@ class RecursivePrompting(Method):
 
         desc = self._substitute_dependencies(problem.uid, problem.description)
         instructions_prompt = self._instructions_prompt.format(
-            problem=desc, subproblems=deps_str, shots=shots_str
+            problem=desc,
+            ancestors=self._construct_ancestors_context(problem),
+            subproblems=deps_str,
+            shots=shots_str,
         ).strip()
         instructions_prompt = add_roles_to_context(
             instructions_prompt,
@@ -979,6 +986,37 @@ class RecursivePrompting(Method):
             }
         )
 
+    def _construct_ancestors_context(self, problem: _Problem) -> str:
+        """
+        Construct the part of the context that describes the ancestors of a problem.
+
+        ### Parameters
+        ----------
+        `problem`: the problem to be solved.
+
+        ### Returns
+        -------
+        The context string that describes the ancestors of the problem.
+        """
+
+        ancestors_descriptions = Queue()
+
+        p = problem
+        for i in range(self._config.n_context_ancestors):
+            if p.parent is None:
+                break
+            p = self._problems_cache[p.parent]
+            ancestors_descriptions.put(p.description)
+
+        context = ""
+        i = 1
+        while not ancestors_descriptions.empty():
+            desc = ancestors_descriptions.get()
+            context += f"Ancestor problem {i}: {desc}\n"
+            i += 1
+
+        return context
+
     def _construct_unit_context(
         self, problem: _Problem, shots_collection: ShotsCollection
     ) -> tuple[str, list[dict[str, str]]]:
@@ -1020,6 +1058,7 @@ class RecursivePrompting(Method):
                 deps_str = self._construct_subproblems_str(problem.subproblems)
             context = self._merge_prompt.format(
                 problem=desc,
+                ancestors=self._construct_ancestors_context(problem),
                 subsolutions=deps_str,
                 instructions=problem.instructions,
                 shots=construct_shots_str(shots_collection.merge),
@@ -1033,6 +1072,7 @@ class RecursivePrompting(Method):
         else:
             context = self._unit_prompt.format(
                 problem=desc,
+                ancestors=self._construct_ancestors_context(problem),
                 shots=construct_shots_str(shots_collection.unit),
             ).strip()
             context = add_roles_to_context(
