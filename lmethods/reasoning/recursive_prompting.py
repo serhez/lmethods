@@ -24,6 +24,9 @@ from lmethods.utils import (
     read_prompt,
 )
 
+# TODO: Idea: additional step in which we ask the model to include any relevant info to the sub-problem which is present in the parent problem
+# TODO: Idea: additional step in which we ask the model to re-phrase the problem description so if flows naturally when embedding dependencies
+
 
 # TODO: Provide prompts in a similar way as with the ShotsCollection
 # TODO: Parallelize `generate` (look at the WIP file)
@@ -769,6 +772,8 @@ class RecursivePrompting(Method):
                 continue
 
             dep_sol = self._problems_cache[dep_uid].solution or ""
+            if dep_sol[-1] in END_CHARS:
+                dep_sol = dep_sol[:-1]
             description = description[:left_i] + dep_sol + description[right_i + 1 :]
             len_diff = len(description)
             description = self._clean_description(description)
