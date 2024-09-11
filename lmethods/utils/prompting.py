@@ -108,7 +108,7 @@ def construct_shots_str(
     ----------
     `shots`: a list of (input, target) pairs to use for in-context learning.
     `syntax`: the syntax of the subproblems in the shots.
-    `header_level`: the level of the header to use for the subproblems.
+    `header_level`: the level to use for the headers (e.g., "Answer" and "Problem description").
     - This parameter is only used when `syntax` is `SubproblemSyntax.MARKDOWN_HEADERS`.
 
     ### Returns
