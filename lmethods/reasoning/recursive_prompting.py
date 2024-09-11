@@ -91,7 +91,7 @@ class RecursivePrompting(Method):
         This is irrelevant if dependencies are not elicited via the split prompt.
         """
 
-        subproblem_header_level: int = 2
+        subproblem_header_level: int = 3
         """
         The header level to use when representing sub-problems in the merge prompt (i.e., the number of '#' characters).
         This is only relevant if `subproblem_syntax == SubproblemSyntax.MARKDOWN_HEADERS`.
@@ -848,7 +848,7 @@ class RecursivePrompting(Method):
         shots_str = construct_shots_str(
             shots.split,
             self._config.subproblem_syntax,
-            self._config.subproblem_header_level,
+            self._config.subproblem_header_level - 1,
         )
 
         desc = self._substitute_dependencies(problem.uid, problem.description)
@@ -922,7 +922,9 @@ class RecursivePrompting(Method):
             shots = []
 
         shots_str = construct_shots_str(
-            shots, self._config.subproblem_syntax, self._config.subproblem_header_level
+            shots,
+            self._config.subproblem_syntax,
+            self._config.subproblem_header_level - 1,
         )
         if self._config.dependency_syntax == DependencySyntax.BRACKETS_PARENS:
             deps_str = self._construct_subproblems_str(
@@ -1120,7 +1122,7 @@ class RecursivePrompting(Method):
                 shots=construct_shots_str(
                     shots_collection.merge,
                     self._config.subproblem_syntax,
-                    self._config.subproblem_header_level,
+                    self._config.subproblem_header_level - 1,
                 ),
             ).strip()
             context = add_roles_to_context(
@@ -1136,7 +1138,7 @@ class RecursivePrompting(Method):
                 shots=construct_shots_str(
                     shots_collection.unit,
                     self._config.subproblem_syntax,
-                    self._config.subproblem_header_level,
+                    self._config.subproblem_header_level - 1,
                 ),
             ).strip()
             context = add_roles_to_context(
