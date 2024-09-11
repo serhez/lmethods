@@ -1,6 +1,8 @@
 from abc import ABC
 from typing import overload
 
+from lmethods.utils.decomposition import SubproblemSyntax
+
 SEP_CHARS = [".", "!", "?", ":", ";", ",", "|"]
 """The characters that can be used as separators."""
 
@@ -94,13 +96,20 @@ def read_prompt(path: str) -> str:
     return prompt
 
 
-def construct_shots_str(shots: list[tuple[str, str]]) -> str:
+def construct_shots_str(
+    shots: list[tuple[str, str]],
+    syntax: SubproblemSyntax = SubproblemSyntax.BULLET_POINTS,
+    header_level: int = 2,
+) -> str:
     """
     Construct a string from a list of shots.
 
     ### Parameters
     ----------
     `shots`: a list of (input, target) pairs to use for in-context learning.
+    `syntax`: the syntax of the subproblems in the shots.
+    `header_level`: the level of the header to use for the subproblems.
+    - This parameter is only used when `syntax` is `SubproblemSyntax.MARKDOWN_HEADERS`.
 
     ### Returns
     -------
@@ -116,15 +125,22 @@ def construct_shots_str(shots: list[tuple[str, str]]) -> str:
 
     shots_str = ""
     for shot in shots:
-        # Problem
-        shots_str += f"Problem: {shot[0]}{'' if any(shot[0].endswith(c) for c in END_CHARS) else '.'}\n"
+        if syntax == SubproblemSyntax.BULLET_POINTS:
+            # Problem
+            shots_str += f"Problem: {shot[0]}{'' if any(shot[0].endswith(c) for c in END_CHARS) else '.'}\n"
 
-        # Answer
-        if any(shot[1].strip().startswith(c) for c in BULLET_POINTS_CHARS):
-            sep = "\n"
-        else:
-            sep = " "
-        shots_str += f"Answer:{sep}{shot[1]}{'' if any(shot[1].endswith(c) for c in END_CHARS) else '.'}\n\n"
+            # Answer
+            if any(shot[1].strip().startswith(c) for c in BULLET_POINTS_CHARS):
+                sep = "\n"
+            else:
+                sep = " "
+            shots_str += f"Answer:{sep}{shot[1]}{'' if any(shot[1].endswith(c) for c in END_CHARS) else '.'}\n\n"
+        elif syntax == SubproblemSyntax.MARKDOWN_HEADERS:
+            # Problem
+            shots_str += f"{'#' * header_level} Problem description\n\n{shot[0]}{'' if any(shot[0].endswith(c) for c in END_CHARS) else '.'}\n\n"
+
+            # Answer
+            shots_str += f"{'#' * header_level} Answer\n\n{shot[1]}{'' if any(shot[1].endswith(c) for c in END_CHARS) else '.'}\n\n"
 
     return shots_str
 

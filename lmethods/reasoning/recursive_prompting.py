@@ -845,7 +845,11 @@ class RecursivePrompting(Method):
             self._solve_directly(problem, shots)
             return
 
-        shots_str = construct_shots_str(shots.split)
+        shots_str = construct_shots_str(
+            shots.split,
+            self._config.subproblem_syntax,
+            self._config.subproblem_header_level,
+        )
 
         desc = self._substitute_dependencies(problem.uid, problem.description)
         split_prompt = self._split_prompt.format(
@@ -917,7 +921,9 @@ class RecursivePrompting(Method):
         if shots is None:
             shots = []
 
-        shots_str = construct_shots_str(shots)
+        shots_str = construct_shots_str(
+            shots, self._config.subproblem_syntax, self._config.subproblem_header_level
+        )
         if self._config.dependency_syntax == DependencySyntax.BRACKETS_PARENS:
             deps_str = self._construct_subproblems_str(
                 problem.subproblems + problem.dependencies
@@ -1111,7 +1117,11 @@ class RecursivePrompting(Method):
                 ancestors=self._construct_ancestors_context(problem),
                 subsolutions=deps_str,
                 instructions=problem.instructions,
-                shots=construct_shots_str(shots_collection.merge),
+                shots=construct_shots_str(
+                    shots_collection.merge,
+                    self._config.subproblem_syntax,
+                    self._config.subproblem_header_level,
+                ),
             ).strip()
             context = add_roles_to_context(
                 context,
@@ -1123,7 +1133,11 @@ class RecursivePrompting(Method):
             context = self._unit_prompt.format(
                 problem=desc,
                 ancestors=self._construct_ancestors_context(problem),
-                shots=construct_shots_str(shots_collection.unit),
+                shots=construct_shots_str(
+                    shots_collection.unit,
+                    self._config.subproblem_syntax,
+                    self._config.subproblem_header_level,
+                ),
             ).strip()
             context = add_roles_to_context(
                 context,
