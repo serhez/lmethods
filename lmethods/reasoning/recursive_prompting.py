@@ -17,6 +17,7 @@ from lmethods.utils import (
     DependencySyntax,
     IDGenerator,
     SearchStrategy,
+    SubproblemSyntax,
     Usage,
     add_roles_to_context,
     classproperty,
@@ -81,10 +82,21 @@ class RecursivePrompting(Method):
         elicit_revision: bool = False
         """Whether to revise the solution using the model."""
 
+        subproblem_syntax: SubproblemSyntax = SubproblemSyntax.BULLET_POINTS
+        """The syntax used to represent sub-problems in the split prompt."""
+
         dependency_syntax: DependencySyntax = DependencySyntax.BRACKETS_PARENS
         """
         The syntax used to represent dependencies between sub-problems.
         This is irrelevant if dependencies are not elicited via the split prompt.
+        """
+
+        subproblem_header_level: int = 2
+        """
+        The header level to use when representing sub-problems in the merge prompt (i.e., the number of '#' characters).
+        This is only relevant if `subproblem_syntax == SubproblemSyntax.MARKDOWN_HEADERS`.
+        Sub-solutions will add one to this level.
+        The provision of the descriptions of ancestor problems will also use this level.
         """
 
         search_strategy: SearchStrategy = SearchStrategy.BFS
@@ -139,6 +151,32 @@ class RecursivePrompting(Method):
             - `dependencies`: a list of the IDs of the problems that this problem depends on (includes subproblems).
             - `solution`: the solution to the problem.
         """
+
+        def __post_init__(self):
+            if self.elicit_instructions and self.instructions_prompt_path is None:
+                raise ValueError(
+                    "`instructions_prompt_path` is required when `elicit_instructions` is `True`."
+                )
+
+            if (
+                self.subproblem_syntax == SubproblemSyntax.MARKDOWN_HEADERS
+                and self.dependency_syntax
+                not in [
+                    DependencySyntax.HEADER_ANGLE,
+                    DependencySyntax.HEADER_CURLY,
+                ]
+            ) or (
+                self.subproblem_syntax == SubproblemSyntax.BULLET_POINTS
+                and self.dependency_syntax
+                not in [
+                    DependencySyntax.BRACKETS_PARENS,
+                    DependencySyntax.BRACKETS_ANGLE,
+                    DependencySyntax.BRACKETS_CURLY,
+                ]
+            ):
+                raise ValueError(
+                    f"`dependency_syntax` '{self.dependency_syntax}' is not compatible with `subproblem_syntax` '{self.subproblem_syntax}'."
+                )
 
     class ShotsCollection(BaseShotsCollection):
         """A collection of (input, target) pairs to use for in-context learning."""
@@ -447,6 +485,8 @@ class RecursivePrompting(Method):
             DependencySyntax.BRACKETS_PARENS: (None, None),
             DependencySyntax.BRACKETS_ANGLE: ("<", ">"),
             DependencySyntax.BRACKETS_CURLY: ("{", "}"),
+            DependencySyntax.HEADER_ANGLE: ("<", ">"),
+            DependencySyntax.HEADER_CURLY: ("{", "}"),
         }[self._config.dependency_syntax]
 
     def _add_to_cache(self, problems: _Problem | list[_Problem]):
@@ -1017,7 +1057,12 @@ class RecursivePrompting(Method):
         i = 1
         while not ancestors_descriptions.empty():
             desc = ancestors_descriptions.get()
-            context += f"Ancestor problem {i}: {desc}\n"
+            if self._config.subproblem_syntax == SubproblemSyntax.MARKDOWN_HEADERS:
+                # Use config.subproblem_header_level #'s
+                context += f"{'#' * i} Ancestor problem {i}\n\n{desc}\n\n"
+            else:
+                context += f"Ancestor problem {i}: {desc}\n"
+
             i += 1
 
         return context
@@ -1089,9 +1134,9 @@ class RecursivePrompting(Method):
 
         return case, context
 
-    def _parse_subproblems(self, output: str, parent_uid: str) -> list[str]:
+    def _parse_bullet_points(self, output: str, parent_uid: str) -> dict[str, _Problem]:
         """
-        Parse the output of the model to find sub-problems.
+        Parse the output of the model to find sub-problems, given `SubproblemSyntax.BULLET_POINTS`.
 
         ### Parameters
         ----------
@@ -1099,10 +1144,8 @@ class RecursivePrompting(Method):
         `parent_uid`: the UID of the parent problem in the decomposition graph.
 
         ### Returns
-        -------
-        A list of the IDs of the sub-problems to be solved.
-        - If the list is empty, the problem is a unit problem.
-        - The list may be empty if the maximum width or the maximum number of nodes is exceeded, in which case the problem must be solved directly.
+        ----------
+        A dictionary with the local IDs of the sub-problems as keys and the sub-problems as values.
         """
 
         # The dictionary with the local IDs as keys, in order to correctly work out the dependencies
@@ -1149,6 +1192,104 @@ class RecursivePrompting(Method):
                     subproblems_dict[subp.lid] = subp
 
                     break
+
+        return subproblems_dict
+
+    def _parse_markdown_headers(
+        self, output: str, parent_uid: str
+    ) -> dict[str, _Problem]:
+        """
+        Parse the output of the model to find sub-problems, given `SubproblemSyntax.MARKDOWN_HEADERS`.
+
+        ### Parameters
+        ----------
+        `output`: the output of the model.
+        `parent_uid`: the UID of the parent problem in the decomposition graph.
+
+        ### Returns
+        ----------
+        A dictionary with the local IDs of the sub-problems as keys and the sub-problems as values.
+        """
+
+        # The dictionary with the local IDs as keys, in order to correctly work out the dependencies
+        subproblems_dict: dict[str, RecursivePrompting._Problem] = {}
+
+        # Find the lowest level of headers
+        lines = [line.strip() for line in output.split("\n")]
+        lowest_level = None
+        for line in lines:
+            level = 0
+            while level < len(line) and line[level] == "#":
+                level += 1
+            if level > 0 and (lowest_level is None or level < lowest_level):
+                lowest_level = level
+
+        if lowest_level is None:
+            return subproblems_dict
+
+        # Parse the headers
+        local_i = 1
+        current_raw_sp = None
+        for line in lines:
+            # Find level
+            level = 0
+            while level < len(line) and line[level] == "#":
+                level += 1
+
+            # Add the line to the current sub-problem raw string
+            if level == 0 and current_raw_sp is not None:
+                current_raw_sp += f"\n{line}"
+
+            if level == lowest_level:
+                if current_raw_sp is not None:
+                    # Construct the previous sub-problem
+                    subp = self._parse_raw_subproblem(
+                        current_raw_sp, local_i, parent_uid
+                    )
+                    local_i += 1
+
+                    # Create global IDs; this is necessary because the IDs generated
+                    # by the model are likely to repeat across independent splitting steps.
+                    # The keys of the dictionary are still the local IDs.
+                    if subp.lid in subproblems_dict:
+                        self._logger.warn(
+                            f"[RecursivePrompting.parse_subproblems] The local ID '{subp.lid}' is repeated in the output. Incoming dependencies will be ignored."
+                        )
+                        subp.lid = subp.uid
+                    subproblems_dict[subp.lid] = subp
+
+                # Get rid of the prefix
+                line = line[level:].strip()
+
+                # Start a new sub-problem
+                current_raw_sp = line
+
+        return subproblems_dict
+
+    def _parse_subproblems(self, output: str, parent_uid: str) -> list[str]:
+        """
+        Parse the output of the model to find sub-problems.
+
+        ### Parameters
+        ----------
+        `output`: the output of the model.
+        `parent_uid`: the UID of the parent problem in the decomposition graph.
+
+        ### Returns
+        -------
+        A list of the IDs of the sub-problems to be solved.
+        - If the list is empty, the problem is a unit problem.
+        - The list may be empty if the maximum width or the maximum number of nodes is exceeded, in which case the problem must be solved directly.
+        """
+
+        if self._config.subproblem_syntax == SubproblemSyntax.BULLET_POINTS:
+            subproblems_dict = self._parse_bullet_points(output, parent_uid)
+        elif self._config.subproblem_syntax == SubproblemSyntax.MARKDOWN_HEADERS:
+            subproblems_dict = self._parse_markdown_headers(output, parent_uid)
+        else:
+            raise ValueError(
+                f"[RecursivePrompting.parse_subproblems] The sub-problem syntax '{self._config.subproblem_syntax}' is not supported."
+            )
 
         # Exceeding the maximum width
         if len(subproblems_dict) > self._config.max_width:
@@ -1222,7 +1363,7 @@ class RecursivePrompting(Method):
         self, raw_problem: str, problem_idx: int, parent_uid: str
     ) -> _Problem:
         """
-        Parse a raw sub-problem string (given in a bullet point) to find the ID, description and dependencies between sub-problems.
+        Parse a raw sub-problem string to find the ID, description and dependencies between sub-problems.
 
         ### Parameters
         ----------
@@ -1236,7 +1377,7 @@ class RecursivePrompting(Method):
 
         ### Notes
         ----------
-        - The raw sub-problem is expected to NOT contain the initial bullet point character.
+        - The raw sub-problem is expected to NOT contain the initial prefix (e.g., header or bullet characters).
         - The raw sub-problem will be stripped of surrounding whitespace.
         - The sub-problem is NOT stored in the cache.
         - The parsing will be done according to `Config.dependency_syntax`.
@@ -1247,21 +1388,26 @@ class RecursivePrompting(Method):
         raw_problem = raw_problem.strip()
 
         if self._config.dependency_syntax == DependencySyntax.NONE:
-            uid = self._id_gen.next()
-            lid = str(problem_idx)
-            desc = raw_problem
-            deps_ids = []
+            return RecursivePrompting._Problem(
+                uid=self._id_gen.next(),
+                lid=str(problem_idx),
+                description=raw_problem,
+                parent=parent_uid,
+                depth=self._problems_cache[parent_uid].depth + 1,
+                subproblems=[],
+                dependencies=[],
+            )
 
-        elif self._config.dependency_syntax in [
+        # ID
+        if self._config.dependency_syntax in [
             DependencySyntax.BRACKETS_PARENS,
             DependencySyntax.BRACKETS_ANGLE,
             DependencySyntax.BRACKETS_CURLY,
         ]:
-            desc = raw_problem
-
-            # ID
             uid = self._id_gen.next()
             try:
+                # Start by assuming the raw problem is the description
+                desc = raw_problem
                 if not desc.startswith("["):
                     raise ValueError
                 right_bracket_i = desc.index("]")
@@ -1272,41 +1418,53 @@ class RecursivePrompting(Method):
                     "[RecursivePrompting.generate] The ID of the problem could not be found for dependency syntax 'BRACKETS_PARENS'."
                 )
                 lid = str(problem_idx)
-
-            # Dependencies
-            if self._config.dependency_syntax == DependencySyntax.BRACKETS_PARENS:
-                try:
-                    if not desc.startswith("("):
-                        raise ValueError
-                    right_paren_i = desc.index(")")
-                    deps_ids = [id.strip() for id in desc[1:right_paren_i].split(",")]
-                    if len(deps_ids) == 0 or (len(deps_ids) == 1 and deps_ids[0] == ""):
-                        deps_ids = []
-                    desc = desc[right_paren_i + 1 :]
-                except ValueError:
-                    self._logger.warn(
-                        "[RecursivePrompting.generate] The dependencies of the problem could not be found for dependency syntax 'BRACKETS_PARENS'."
-                    )
-                    deps_ids = []
+        elif self._config.dependency_syntax in [
+            DependencySyntax.HEADER_ANGLE,
+            DependencySyntax.HEADER_CURLY,
+        ]:
+            # The local ID is the first line (the header)
+            uid = self._id_gen.next()
+            if "\n" in raw_problem:
+                split = raw_problem.split("\n", 1)
+                lid = split[0].strip()
+                desc = split[1].strip()
             else:
-                deps_ids = []
-                anchor_i = 0
-                while anchor_i < len(desc):
-                    left_i = desc.find(self._left_dep_char, anchor_i)
-                    if left_i == -1:
-                        break
-                    right_i = desc.find(self._right_dep_char, left_i)
-                    if right_i == -1:
-                        break
-                    deps_ids.append(desc[left_i + 1 : right_i].strip())
-                    anchor_i = right_i + 1
-
+                lid = str(problem_idx)
+                desc = raw_problem
         else:
-            raise NotImplementedError(
-                "The specified dependency syntax is not implemented."
+            raise ValueError(
+                f"[RecursivePrompting.generate] The dependency syntax '{self._config.dependency_syntax}' is not supported."
             )
 
-        # Description
+        # Dependencies
+        if self._config.dependency_syntax == DependencySyntax.BRACKETS_PARENS:
+            try:
+                if not desc.startswith("("):
+                    raise ValueError
+                right_paren_i = desc.index(")")
+                deps_ids = [id.strip() for id in desc[1:right_paren_i].split(",")]
+                if len(deps_ids) == 0 or (len(deps_ids) == 1 and deps_ids[0] == ""):
+                    deps_ids = []
+                desc = desc[right_paren_i + 1 :]
+            except ValueError:
+                self._logger.warn(
+                    "[RecursivePrompting.generate] The dependencies of the problem could not be found for dependency syntax 'BRACKETS_PARENS'."
+                )
+                deps_ids = []
+        else:
+            deps_ids = []
+            anchor_i = 0
+            while anchor_i < len(desc):
+                left_i = desc.find(self._left_dep_char, anchor_i)
+                if left_i == -1:
+                    break
+                right_i = desc.find(self._right_dep_char, left_i)
+                if right_i == -1:
+                    break
+                deps_ids.append(desc[left_i + 1 : right_i].strip())
+                anchor_i = right_i + 1
+
+        # Clean the description
         if desc[0] in SEP_CHARS:
             desc = desc[1:]
         desc = desc.strip()
@@ -1325,17 +1483,36 @@ class RecursivePrompting(Method):
         if len(subproblems) == 0:
             return ""
 
-        return "".join(
-            [
-                f"- Sub-problem {dep.lid}: {dep.description}"
-                + (
-                    ""
-                    if not dep.is_solved
-                    else f" Sub-solution {dep.lid}: {dep.solution}\n"
-                )
-                for dep in [self._problems_cache[id] for id in subproblems]
-            ]
-        )[:-1]
+        if self._config.subproblem_syntax == SubproblemSyntax.BULLET_POINTS:
+            return "".join(
+                [
+                    f"- Sub-problem {dep.lid}: {dep.description}"
+                    + (
+                        ""
+                        if not dep.is_solved
+                        else f" Sub-solution {dep.lid}: {dep.solution}\n"
+                    )
+                    for dep in [self._problems_cache[id] for id in subproblems]
+                ]
+            )[:-1]
+
+        elif self._config.subproblem_syntax == SubproblemSyntax.MARKDOWN_HEADERS:
+            return "".join(
+                [
+                    f"{'#' * self._config.subproblem_header_level} Sub-problem {dep.lid}\n\n{dep.description}\n\n"
+                    + (
+                        ""
+                        if not dep.is_solved
+                        else f"{'#' * (self._config.subproblem_header_level + 1)} Sub-solution {dep.lid}\n\n{dep.solution}\n\n"
+                    )
+                    for dep in [self._problems_cache[id] for id in subproblems]
+                ][:-2]
+            )
+
+        else:
+            raise ValueError(
+                f"[RecursivePrompting.generate] The sub-problem syntax '{self._config.subproblem_syntax}' is not supported."
+            )
 
     def _save_graph(self, root_id: str) -> bool:
         """

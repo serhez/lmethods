@@ -1,6 +1,6 @@
 import numpy as np
 
-from .decomposition import DependencySyntax, SearchStrategy
+from .decomposition import DependencySyntax, SearchStrategy, SubproblemSyntax
 from .graphs import DAG, DirectedGraph, Edge, Node
 from .logging import NullLogger
 from .prompting import (
@@ -28,6 +28,7 @@ __all__ = [
     "DAG",
     "IDGenerator",
     "DependencySyntax",
+    "SubproblemSyntax",
     "GuardedValue",
     "BaseShotsCollection",
     "Usage",
@@ -41,6 +42,7 @@ __all__ = [
     "classproperty",
     "BULLET_POINTS_CHARS",
     "END_CHARS",
+    "SEP_CHARS",
 ]
 
 
