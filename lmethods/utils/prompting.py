@@ -1,7 +1,7 @@
 from abc import ABC
 from typing import overload
 
-from lmethods.utils.decomposition import SubproblemSyntax
+from lmethods.utils.decomposition import HierarchySyntax
 
 SEP_CHARS = [".", "!", "?", ":", ";", ",", "|"]
 """The characters that can be used as separators."""
@@ -98,7 +98,7 @@ def read_prompt(path: str) -> str:
 
 def construct_shots_str(
     shots: list[tuple[str, str]],
-    syntax: SubproblemSyntax = SubproblemSyntax.BULLET_POINTS,
+    syntax: HierarchySyntax = HierarchySyntax.BULLET_POINTS,
     header_level: int = 2,
 ) -> str:
     """
@@ -109,7 +109,7 @@ def construct_shots_str(
     `shots`: a list of (input, target) pairs to use for in-context learning.
     `syntax`: the syntax of the subproblems in the shots.
     `header_level`: the level to use for the headers (e.g., "Answer" and "Problem description").
-    - This parameter is only used when `syntax` is `SubproblemSyntax.MARKDOWN_HEADERS`.
+    - This parameter is only used when `syntax` is `HierarchySyntax.MARKDOWN_HEADERS`.
 
     ### Returns
     -------
@@ -125,7 +125,7 @@ def construct_shots_str(
 
     shots_str = ""
     for shot in shots:
-        if syntax == SubproblemSyntax.BULLET_POINTS:
+        if syntax == HierarchySyntax.BULLET_POINTS:
             # Problem
             shots_str += f"Problem: {shot[0]}{'' if any(shot[0].endswith(c) for c in END_CHARS) else '.'}\n"
 
@@ -135,7 +135,7 @@ def construct_shots_str(
             else:
                 sep = " "
             shots_str += f"Answer:{sep}{shot[1]}{'' if any(shot[1].endswith(c) for c in END_CHARS) else '.'}\n\n"
-        elif syntax == SubproblemSyntax.MARKDOWN_HEADERS:
+        elif syntax == HierarchySyntax.MARKDOWN_HEADERS:
             # Problem
             shots_str += f"{'#' * header_level} Problem description\n\n{shot[0]}{'' if any(shot[0].endswith(c) for c in END_CHARS) else '.'}\n\n"
 

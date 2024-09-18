@@ -10,28 +10,28 @@ class DependencySyntax(str, Enum):
     BRACKETS_PARENS = "brackets_parens"
     """
     The ID of the sub-problem within brackets, followed by the comma-separated ids of the sub-problems it depends on within parenthesis.
-    Only compatible with `SubproblemSyntax.BULLET_POINTS`.
+    Only compatible with `HierarchySyntax.BULLET_POINTS`.
     E.g., "[P3](P0, P2)".
     """
 
     BRACKETS_ANGLE = "brackets_angle"
     """
     The ID of the sub-problem within brackets, followed by the description which can contain dependencies whose IDs are specified between angle brackets.
-    Only compatible with `SubproblemSyntax.BULLET_POINTS`.
+    Only compatible with `HierarchySyntax.BULLET_POINTS`.
     E.g., "[P3] Some description that depends on <P1> and <P2>.".
     """
 
     BRACKETS_CURLY = "brackets_curly"
     """
     The ID of the sub-problem within brackets, followed by the description which can contain dependencies whose IDs are specified between curly braces.
-    Only compatible with `SubproblemSyntax.BULLET_POINTS`.
+    Only compatible with `HierarchySyntax.BULLET_POINTS`.
     E.g., "[P3] Some description that depends on {P1} and {P2}.".
     """
 
     HEADER_ANGLE = "header_angle"
     """
     The ID of the sub-problem is specified in a markdown header, followed by the description which can contain dependencies whose IDs are specified between angle brackets.
-    Only compatible with `SubproblemSyntax.MARKDOWN_HEADERS`.
+    Only compatible with `HierarchySyntax.MARKDOWN_HEADERS`.
     E.g.:
 
     ### P3
@@ -42,7 +42,7 @@ class DependencySyntax(str, Enum):
     HEADER_CURLY = "header_curly"
     """
     The ID of the sub-problem is specified in a markdown header, followed by the description which can contain dependencies whose IDs are specified between curly braces.
-    Only compatible with `SubproblemSyntax.MARKDOWN_HEADERS`.
+    Only compatible with `HierarchySyntax.MARKDOWN_HEADERS`.
     E.g.:
 
     ### P3
@@ -51,7 +51,7 @@ class DependencySyntax(str, Enum):
     """
 
 
-class SubproblemSyntax(str, Enum):
+class HierarchySyntax(str, Enum):
     """The syntax used to represent sub-problems when splitting."""
 
     BULLET_POINTS = "bullet_points"

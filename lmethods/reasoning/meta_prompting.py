@@ -10,6 +10,7 @@ from lmethods.method import Method
 from lmethods.protocols import Dataset, Logger, Model
 from lmethods.utils import (
     BaseShotsCollection,
+    HierarchySyntax,
     Usage,
     add_roles_to_context,
     choose_response_via_sc,
@@ -35,6 +36,9 @@ class MetaPrompting(Method):
 
         prompt_path: str
         """The path to the meta-prompt used to solve multi-step reasoning problems."""
+
+        hierarchy_syntax: HierarchySyntax = HierarchySyntax.BULLET_POINTS
+        """The syntax used to represent hierarchies in the constructed prompt."""
 
         self_consistency_n: int = 1
         """
@@ -210,7 +214,7 @@ class MetaPrompting(Method):
 
         sampling_usage = Usage()
         sc_usage = Usage()
-        shots_str = construct_shots_str(shots.solve)
+        shots_str = construct_shots_str(shots.solve, self._config.hierarchy_syntax)
 
         inputs = [
             add_roles_to_context(
@@ -293,7 +297,7 @@ class MetaPrompting(Method):
     ) -> tuple[str, GenerationInfo]:
         sampling_usage = Usage()
         sc_usage = Usage()
-        shots_str = construct_shots_str(shots.solve)
+        shots_str = construct_shots_str(shots.solve, self._config.hierarchy_syntax)
 
         input = add_roles_to_context(
             self._prompt.format(problem=context, shots=shots_str),

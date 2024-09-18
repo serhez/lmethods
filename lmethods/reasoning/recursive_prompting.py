@@ -15,9 +15,9 @@ from lmethods.utils import (
     SEP_CHARS,
     BaseShotsCollection,
     DependencySyntax,
+    HierarchySyntax,
     IDGenerator,
     SearchStrategy,
-    SubproblemSyntax,
     Usage,
     add_roles_to_context,
     classproperty,
@@ -82,7 +82,7 @@ class RecursivePrompting(Method):
         elicit_revision: bool = False
         """Whether to revise the solution using the model."""
 
-        subproblem_syntax: SubproblemSyntax = SubproblemSyntax.BULLET_POINTS
+        subproblem_syntax: HierarchySyntax = HierarchySyntax.BULLET_POINTS
         """The syntax used to represent sub-problems in the split prompt."""
 
         dependency_syntax: DependencySyntax = DependencySyntax.BRACKETS_PARENS
@@ -94,7 +94,7 @@ class RecursivePrompting(Method):
         subproblem_header_level: int = 3
         """
         The header level to use when representing sub-problems in the merge prompt (i.e., the number of '#' characters).
-        This is only relevant if `subproblem_syntax == SubproblemSyntax.MARKDOWN_HEADERS`.
+        This is only relevant if `subproblem_syntax == HierarchySyntax.MARKDOWN_HEADERS`.
         Sub-solutions will add one to this level.
         The provision of the descriptions of ancestor problems will also use this level.
         """
@@ -159,14 +159,14 @@ class RecursivePrompting(Method):
                 )
 
             if (
-                self.subproblem_syntax == SubproblemSyntax.MARKDOWN_HEADERS
+                self.subproblem_syntax == HierarchySyntax.MARKDOWN_HEADERS
                 and self.dependency_syntax
                 not in [
                     DependencySyntax.HEADER_ANGLE,
                     DependencySyntax.HEADER_CURLY,
                 ]
             ) or (
-                self.subproblem_syntax == SubproblemSyntax.BULLET_POINTS
+                self.subproblem_syntax == HierarchySyntax.BULLET_POINTS
                 and self.dependency_syntax
                 not in [
                     DependencySyntax.BRACKETS_PARENS,
@@ -1065,7 +1065,7 @@ class RecursivePrompting(Method):
         i = 1
         while not ancestors_descriptions.empty():
             desc = ancestors_descriptions.get()
-            if self._config.subproblem_syntax == SubproblemSyntax.MARKDOWN_HEADERS:
+            if self._config.subproblem_syntax == HierarchySyntax.MARKDOWN_HEADERS:
                 # Use config.subproblem_header_level #'s
                 context += f"{'#' * i} Ancestor problem {i}\n\n{desc}\n\n"
             else:
@@ -1152,7 +1152,7 @@ class RecursivePrompting(Method):
 
     def _parse_bullet_points(self, output: str, parent_uid: str) -> dict[str, _Problem]:
         """
-        Parse the output of the model to find sub-problems, given `SubproblemSyntax.BULLET_POINTS`.
+        Parse the output of the model to find sub-problems, given `HierarchySyntax.BULLET_POINTS`.
 
         ### Parameters
         ----------
@@ -1215,7 +1215,7 @@ class RecursivePrompting(Method):
         self, output: str, parent_uid: str
     ) -> dict[str, _Problem]:
         """
-        Parse the output of the model to find sub-problems, given `SubproblemSyntax.MARKDOWN_HEADERS`.
+        Parse the output of the model to find sub-problems, given `HierarchySyntax.MARKDOWN_HEADERS`.
 
         ### Parameters
         ----------
@@ -1298,9 +1298,9 @@ class RecursivePrompting(Method):
         - The list may be empty if the maximum width or the maximum number of nodes is exceeded, in which case the problem must be solved directly.
         """
 
-        if self._config.subproblem_syntax == SubproblemSyntax.BULLET_POINTS:
+        if self._config.subproblem_syntax == HierarchySyntax.BULLET_POINTS:
             subproblems_dict = self._parse_bullet_points(output, parent_uid)
-        elif self._config.subproblem_syntax == SubproblemSyntax.MARKDOWN_HEADERS:
+        elif self._config.subproblem_syntax == HierarchySyntax.MARKDOWN_HEADERS:
             subproblems_dict = self._parse_markdown_headers(output, parent_uid)
         else:
             raise ValueError(
@@ -1499,7 +1499,7 @@ class RecursivePrompting(Method):
         if len(subproblems) == 0:
             return ""
 
-        if self._config.subproblem_syntax == SubproblemSyntax.BULLET_POINTS:
+        if self._config.subproblem_syntax == HierarchySyntax.BULLET_POINTS:
             return "".join(
                 [
                     f"- Sub-problem {dep.lid}: {dep.description}"
@@ -1512,7 +1512,7 @@ class RecursivePrompting(Method):
                 ]
             )[:-1]
 
-        elif self._config.subproblem_syntax == SubproblemSyntax.MARKDOWN_HEADERS:
+        elif self._config.subproblem_syntax == HierarchySyntax.MARKDOWN_HEADERS:
             return "".join(
                 [
                     f"{'#' * self._config.subproblem_header_level} Sub-problem {dep.lid}\n\n{dep.description}\n\n"
