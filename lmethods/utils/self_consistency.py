@@ -87,6 +87,7 @@ def choose_response_via_sc(
     `model`: the model to use for the task.
     `context`: the context of the problem.
     `responses`: the responses to choose from.
+    `syntax`: the syntax of the responses.
     `max_n_per_call`: the maximum number of responses to include in a single call to the model.
     `logger`: a logger to record the task's progress and any errors.
 
@@ -113,7 +114,9 @@ def choose_response_via_sc(
         partitions = [p.tolist() for p in np.array_split(responses, 2)]
         chosen_idxs = []
         for p in partitions:
-            i, u = choose_response_via_sc(model, context, p, max_n_per_call, logger)
+            i, u = choose_response_via_sc(
+                model, context, p, syntax, max_n_per_call, logger
+            )
             chosen_idxs.append(i)
             usage += u
 
