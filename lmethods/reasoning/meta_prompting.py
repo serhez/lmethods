@@ -260,6 +260,7 @@ class MetaPrompting(Method):
                 self._model,
                 context[i],
                 outputs[i],
+                self._config.hierarchy_syntax,
                 self._config.self_consistency_max_n_per_call,
                 self._logger,
             )
@@ -326,6 +327,7 @@ class MetaPrompting(Method):
             self._model,
             context,
             responses,
+            self._config.hierarchy_syntax,
             self._config.self_consistency_max_n_per_call,
             self._logger,
         )
