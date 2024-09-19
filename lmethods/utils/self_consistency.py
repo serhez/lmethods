@@ -1,10 +1,13 @@
 import numpy as np
 
 from lmethods.protocols import Logger, Model
+from lmethods.utils.decomposition import HierarchySyntax
 from lmethods.utils.usage import Usage
 
 
-def construct_self_consistency_context(query: str, responses: list[str]) -> str:
+def construct_self_consistency_context(
+    query: str, responses: list[str], syntax: HierarchySyntax
+) -> str:
     """
     Returns a self-consistency context to prompt the model to choose the most common response to a query or, in case all responses are different, the best reponse as chosen by the model.
 
@@ -24,10 +27,18 @@ def construct_self_consistency_context(query: str, responses: list[str]) -> str:
 
     assert len(responses) != 0, "The list of responses must have at least one element."
 
-    context = f"Choose the response that better represents the most common response. If they are all different, choose the response that best solves the query.\n\nQuery: {query}\n"
-    for i, response in enumerate(responses):
-        context += f"- Response {i}: {response}\n"
-    context += "\nThe response I choose is the one with number "
+    if syntax == HierarchySyntax.BULLET_POINTS:
+        context = f"Choose the response that better represents the most common response. If they are all different, choose the response that best solves the query.\n\nQuery: {query}\n"
+        for i, response in enumerate(responses):
+            context += f"- Response {i}: {response}\n"
+        context += "\nThe response I choose is the one with number "
+
+    elif syntax == HierarchySyntax.MARKDOWN_HEADERS:
+        context = f"Choose the response that better represents the most common response. If they are all different, choose the response that best solves the query."
+        context += f"\n\n# Query: {query}\n\n"
+        for i, response in enumerate(responses):
+            context += f"# Response {i}\n\n{response}\n\n"
+        context += "# Chosen response\n\nThe response I choose is the one with number "
 
     return context
 
@@ -64,6 +75,7 @@ def choose_response_via_sc(
     model: Model,
     context: str,
     responses: list[str],
+    syntax: HierarchySyntax,
     max_n_per_call: int = 10,
     logger: Logger | None = None,
 ) -> tuple[int, Usage]:
@@ -107,7 +119,7 @@ def choose_response_via_sc(
 
         choices = [partitions[i][idx] for i, idx in enumerate(chosen_idxs)]
 
-    input = construct_self_consistency_context(context, choices)
+    input = construct_self_consistency_context(context, choices, syntax)
     try:
         output, info = model.generate(
             input,
