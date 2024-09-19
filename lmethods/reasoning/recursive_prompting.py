@@ -164,6 +164,7 @@ class RecursivePrompting(Method):
                 not in [
                     DependencySyntax.HEADER_ANGLE,
                     DependencySyntax.HEADER_CURLY,
+                    DependencySyntax.NONE,
                 ]
             ) or (
                 self.subproblem_syntax == HierarchySyntax.BULLET_POINTS
@@ -172,6 +173,7 @@ class RecursivePrompting(Method):
                     DependencySyntax.BRACKETS_PARENS,
                     DependencySyntax.BRACKETS_ANGLE,
                     DependencySyntax.BRACKETS_CURLY,
+                    DependencySyntax.NONE,
                 ]
             ):
                 raise ValueError(
