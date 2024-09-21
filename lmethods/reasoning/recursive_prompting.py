@@ -63,6 +63,12 @@ class RecursivePrompting(Method):
         - It is recommended to set `max_nodes` to a reasonable value if this is set to `False`.
         """
 
+        threshold_width: int = 6
+        """
+        The hard limit for the number of sub-problems that can be provided at any given decomposition step.
+        This parameter will always be enforced, regardless of the value of `enforce_max_width`.
+        """
+
         max_internal_tokens: int = 500
         """The maximum number of tokens that can be generated in internal calls to the model (e.g., decomposing, generating instructions, merging sub-solutions, etc.)."""
 
@@ -1317,9 +1323,14 @@ class RecursivePrompting(Method):
                 self._logger.warn(log_msg)
                 return []
             self._logger.warn(log_msg)
+        if len(subproblems_dict) > self._config.threshold_width:
+            self._logger.warn(
+                f"[RecursivePrompting.parse_subproblems] The number of sub-problems ({len(subproblems_dict)}) exceeds the threshold width ({self._config.threshold_width}). The problem will be solved directly."
+            )
+            return []
 
         # Exceeding the maximum number of nodes
-        elif len(subproblems_dict) + len(self._problems_cache) > self._config.max_nodes:
+        if len(subproblems_dict) + len(self._problems_cache) > self._config.max_nodes:
             self._logger.warn(
                 f"[RecursivePrompting.[parse_subproblems]] Adding the proposed sub-problems ({len(subproblems_dict)}) "
                 f"to the existing amount of problems ({len(self._problems_cache)}) would exceed the max. "
