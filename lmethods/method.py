@@ -150,6 +150,12 @@ class Method(ABC):
             self._logger = logger
         self._usage = Usage()
 
+        self._answer_regex = None
+        if self._config.answer_regex is not None:
+            self._answer_regex = re.compile(
+                self._config.answer_regex, flags=re.MULTILINE | re.DOTALL
+            )
+
         self._logger.debug({"[Method.config]": asdict(self._config)})
 
     def __repr__(self):
@@ -197,13 +203,21 @@ class Method(ABC):
         - If the regular expression does not match the output, a warning will be issued and the whole output will be considered as the answer.
         """
 
-        if self._config.answer_regex is None:
+        if self._answer_regex is None:
             return output
 
         # Use try-except to not break the `generate` pipeline for any reason
         try:
-            match = re.search(self._config.answer_regex, output)
-            answer = match.group(1)  # type: ignore[reportOptionalMemberAccess]
+            match = self._answer_regex.findall(output)
+            if len(match) > 1:
+                self._logger.warn(
+                    {
+                        f"Multiple matches found for the regex '{self._config.answer_regex}'.": None,
+                        "Output": output,
+                        "Corrective action": "The last match will be considered as the answer.",
+                    }
+                )
+            answer = match[-1]
         except Exception:
             self._logger.warn(
                 {
@@ -261,8 +275,8 @@ class Method(ABC):
         """
 
         if isinstance(context, str):
-            output, info = self._generate_impl(context, shots, max_tokens)
             self._reset_state()
+            output, info = self._generate_impl(context, shots, max_tokens)
             return output, info
         elif isinstance(context, Dataset):
             context = list(context.test_set.inputs)
@@ -280,8 +294,8 @@ class Method(ABC):
                 f"[{self.__class__.__name__}] Generating {i+1}/{len(context)}"
             )
 
-            output, info = self._generate_impl(c, shots, max_tokens)
             self._reset_state()
+            output, info = self._generate_impl(c, shots, max_tokens)
 
             outputs.append(output)
             agg_info += info

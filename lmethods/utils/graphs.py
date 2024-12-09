@@ -20,7 +20,9 @@ class Edge:
 
 
 class DirectedGraph:
-    def __init__(self, nodes: list[Node] = [], edges: list[Edge] = []):
+    def __init__(
+        self, nodes: list[Node] | None = None, edges: list[Edge] | None = None
+    ):
         """
         Initializes a new directed graph.
 
@@ -33,9 +35,13 @@ class DirectedGraph:
         self._nodes = {}
         self._edges = {}
 
+        if nodes is None:
+            nodes = []
         for node in nodes:
             self.add_node(node)
 
+        if edges is None:
+            edges = []
         for edge in edges:
             self.add_edge(edge)
 
@@ -200,7 +206,9 @@ class DirectedGraph:
 
 
 class DAG(DirectedGraph):
-    def __init__(self, nodes: list[Node] = [], edges: list[Edge] = []):
+    def __init__(
+        self, nodes: list[Node] | None = None, edges: list[Edge] | None = None
+    ):
         """
         Initializes a new directed acyclic graph.
 

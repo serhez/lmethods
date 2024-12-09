@@ -1,6 +1,11 @@
 from abc import ABC
 from typing import overload
 
+from lmethods.utils.decomposition import HierarchySyntax
+
+SEP_CHARS = [".", "!", "?", ":", ";", ",", "|"]
+"""The characters that can be used as separators."""
+
 END_CHARS = [".", "!", "?"]
 """The characters that can end a sentence."""
 
@@ -22,7 +27,7 @@ class BaseShotsCollection(ABC):
     Child classes can also add properties to access the shots in a more convenient way.
     """
 
-    def __init__(self, shots: dict[str, list[tuple[str, str]]] = {}):
+    def __init__(self, shots: dict[str, list[tuple[str, str]]] | None = None):
         """
         Initialize the base shots collection.
 
@@ -30,6 +35,9 @@ class BaseShotsCollection(ABC):
         ----------
         `shots`: a dictionary of shots for different parts of the method's generation process.
         """
+
+        if shots is None:
+            shots = {}
 
         self._shots: dict[str, list[tuple[str, str]]] = shots
 
@@ -88,13 +96,20 @@ def read_prompt(path: str) -> str:
     return prompt
 
 
-def construct_shots_str(shots: list[tuple[str, str]]) -> str:
+def construct_shots_str(
+    shots: list[tuple[str, str]],
+    syntax: HierarchySyntax = HierarchySyntax.BULLET_POINTS,
+    header_level: int = 2,
+) -> str:
     """
     Construct a string from a list of shots.
 
     ### Parameters
     ----------
     `shots`: a list of (input, target) pairs to use for in-context learning.
+    `syntax`: the syntax of the subproblems in the shots.
+    `header_level`: the level to use for the headers (e.g., "Answer" and "Problem description").
+    - This parameter is only used when `syntax` is `HierarchySyntax.MARKDOWN_HEADERS`.
 
     ### Returns
     -------
@@ -110,14 +125,70 @@ def construct_shots_str(shots: list[tuple[str, str]]) -> str:
 
     shots_str = ""
     for shot in shots:
-        # Problem
-        shots_str += f"Problem: {shot[0]}{'' if any(shot[0].endswith(c) for c in END_CHARS) else '.'}\n"
+        if syntax == HierarchySyntax.BULLET_POINTS:
+            # Problem
+            shots_str += f"Problem: {shot[0]}{'' if any(shot[0].endswith(c) for c in END_CHARS) else '.'}\n"
 
-        # Answer
-        if any(shot[1].strip().startswith(c) for c in BULLET_POINTS_CHARS):
-            sep = "\n"
-        else:
-            sep = " "
-        shots_str += f"Answer:{sep}{shot[1]}{'' if any(shot[1].endswith(c) for c in END_CHARS) else '.'}\n\n"
+            # Answer
+            if any(shot[1].strip().startswith(c) for c in BULLET_POINTS_CHARS):
+                sep = "\n"
+            else:
+                sep = " "
+            shots_str += f"Answer:{sep}{shot[1]}{'' if any(shot[1].endswith(c) for c in END_CHARS) else '.'}\n\n"
+        elif syntax == HierarchySyntax.MARKDOWN_HEADERS:
+            # Problem
+            shots_str += f"{'#' * header_level} Problem description\n\n{shot[0]}{'' if any(shot[0].endswith(c) for c in END_CHARS) else '.'}\n\n"
+
+            # Answer
+            shots_str += f"{'#' * header_level} Answer\n\n{shot[1]}{'' if any(shot[1].endswith(c) for c in END_CHARS) else '.'}\n\n"
 
     return shots_str
+
+
+def add_roles_to_context(
+    context: str, system_chars: int = 0, assistant_chars: int = 0
+) -> list[dict[str, str]]:
+    """
+    Add role messages to the context, as specified by `Config.last_chars_as_assistant` and `Config.first_chars_as_system`.
+
+    ### Parameters
+    ----------
+    `context`: the context to add the role messages to.
+
+    ### Returns
+    ----------
+    The context with the role messages added.
+    """
+
+    result = []
+
+    if system_chars > 0:
+        result.append(
+            {
+                "role": "system",
+                "content": context[:system_chars],
+            }
+        )
+
+    if assistant_chars > 0:
+        result.append(
+            {
+                "role": "user",
+                "content": context[system_chars:-assistant_chars],
+            }
+        )
+        result.append(
+            {
+                "role": "assistant",
+                "content": context[-assistant_chars:],
+            }
+        )
+    else:
+        result.append(
+            {
+                "role": "user",
+                "content": context[system_chars:],
+            }
+        )
+
+    return result
